@@ -1,0 +1,613 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## 1.1 File metadata  
+
+Template author: Morgan Carr-Markell  
+Template last modified on: April 4, 2023  
+Notebook modified by: Katie Wang  
+Notebook last modified on: April 11, 2023
+
+
+## 1.2 Data sources  
+
+Species occurrence data:
+
+GBIF.org (29 March 2023) GBIF Occurrence Download https://doi.org/10.15468/dl.7qgrxe
+
+Environmental data:
+
+Fick, S.E. and R.J. Hijmans, 2017. WorldClim 2: new 1km spatial resolution climate surfaces for global land areas. International Journal of Climatology 37 (12): 4302-4315.
+
+WWF Ecoregions: Dinerstein et al. (2017) An Ecoregion-Based Approach to Protecting Half the Terrestrial Realm. BioScience, 67(6): 534–545. https://doi.org/10.1093/biosci/bix014
+
+
+## 1.3 Code sources  
+
+Much of the code is inspired by or directly adapted from these four sources:
+
+The ENMeval 2.0 Vignette
+By Jamie M. Kass, Robert Muscarella, Gonzalo E. Pinilla-Buitrago, and Peter J. Galante
+Date: January 9th, 2023
+https://jamiemkass.github.io/ENMeval/articles/ENMeval-2.0-vignette.html
+
+Preparing Data for MaxEnt Species Distribution Modeling Using R
+By Dale Watt
+Date: October 9th, 2018
+https://www.azavea.com/blog/2018/10/09/preparing-data-for-maxent-species-distribution-modeling-using-r/
+
+Tutorials from The Banta Lab
+By Josh Banta
+https://sites.google.com/site/thebantalab/tutorials?authuser=0
+
+Code shared by Prof. Stephen Adolph and his students Daniel Furman and Sarah Halvorsen from their desert night lizard species distribution modeling project
+https://magazine.hmc.edu/summer-2019/researching-for-an-answer/
+
+
+## 1.4 Libraries   
+
+If you have trouble installing the rJava package (or any of the other packages), let me know.
+
+```{r, message = FALSE}
+library(tidyverse)    # wrangle data
+library(sf)           # vector data
+library(dismo)        # species distribution modeling
+library(rgdal)        # projections and geospatial functions
+library(raster)       # raster data
+library(rJava)        # R to Java interface
+library(maptools)     # helps with manipulating geographic data
+library(sp)           # classes for manipulating spatial data
+library(rgeos)        # interface to geometry engine
+library(randomForest) # classification and regression random forest models
+library(ipred)        # improved prediction using techniques such as bagging
+library(ENMeval)      # MaxEnt modeling
+```
+
+
+## 1.5 Read in data  
+
+### 1.5.1 Responses (points):  
+
+First, we'll read in the csv files generated in hw7. For convenience, I've included those and the folder they were in within the hw8 repository.
+
+```{r}
+background <- read.csv("BV_processed_data/background_points.csv")
+occurrence <- read.csv ("BV_processed_data/occurrence_points.csv")
+```
+
+### 1.5.2 Environmental predictor variables (rasters):  
+
+Next, we'll read in the GeoTIFF files generated in hw7. For convenience, I've included those and the folder they were in within the hw8 repository as well. I've also included one more GeoTIFF file that is a rasterized version of a shapefile of global terrestrial biomes (WWF 2017).
+
+```{r}
+# Get raster file list
+predictor_list <- list.files("BV_processed_data", # folder to extract a list of filenames from
+                            full.names = TRUE, # get the full paths
+                            pattern = ".tif$") # only files ending in .tif
+
+# Make raster stack from files
+predictors <- stack(predictor_list)
+
+predictors
+```
+
+You'll notice that the layer names here are not at all informative.
+
+
+## 1.6 Processing data  
+
+### 1.6.1 Renaming layers in stack  
+
+Let's look at the file names and worldclim data types. Then we'll rename the layers in the stack in a more informative way:
+
+```{r}
+predictor_list
+```
+
+WWF Biome + Bioclim variable descriptions:
+
+*Note:* These are in the same order as alphanumerically-sorted files. If the files were sorted differently on your computer you will need to reorder the names.
+
+* Ecoregions2017 = biomes (from WWF)
+* BIO1 = Annual Mean Temperature
+* BIO12 = Annual Precipitation
+* BIO16 = Precipitation of Wettest Quarter
+* BIO17 = Precipitation of Driest Quarter
+* BIO5 = Max Temperature of Warmest Month
+* BIO6 = Min Temperature of Coldest Month
+* BIO7 = Temperature Annual Range (BIO5-BIO6)
+* BIO8 = Mean Temperature of Wettest Quarter
+
+```{r}
+var_names <- c("Biome",
+              "AnnualMeanTemp",
+               "AnnualPrecip",
+               "PrecipWettestQuarter",
+               "PrecipDriestQuarter",
+               "MaxTempWarmestMonth",
+               "MinTempColdestMonth",
+               "TempAnnualRange",
+               "MeanTempWettestQuarter")
+
+names(predictors) <- var_names
+```
+
+
+### 1.6.2 Categorical variables  
+
+We need to convert any categorical variables to be factors (so they aren't treated as numbers):
+
+```{r}
+predictors$Biome <- raster::as.factor(predictors$Biome)
+```
+
+
+### 1.6.3 Extracting environmental variables for each point  
+
+We use the raster::extract function to extract variable values for each point based on which grid square it occurs in across the 9 raster layers.
+
+```{r}
+# This will create a matrix with values for all 8 environmental variables for each point
+presence_values <- raster::extract(predictors, occurrence)
+background_values <- raster::extract(predictors, background)
+```
+
+1. View the two matrices we just created.
+
+```{r}
+glimpse(presence_values)
+glimpse(background_values)
+```
+
+2. What are their dimensions? What does each dimension represent?
+presence_values is 551 rows * 9 columns, while background_values is 10000 rows * 9 columns. The columns are the WWF Biome + Bioclim variables, while the rows are observations.
+
+
+### 1.6.4 Dividing the points into training and testing sets  
+
+Process presence points into a training set to train the model and a held-out test set to assess how well the model predicts areas with high and low suitability for this species.
+
+```{r}
+set.seed(100) # decided this seed using random number generator
+
+group <- sample(x = c(1, 2, 3, 4, 5), # we want to assign group numbers
+                size = nrow(occurrence), # to each row (observation)
+                replace = T) # this means it will keep randomly drawing 1-5
+
+presence_train <- occurrence[group != 1, ] # make a training set of ~80 percent
+presence_test <- occurrence[group == 1, ] # make a testing set of ~20 percent
+```
+
+
+Process background points in the same way.
+
+```{r}
+set.seed(100) # decided this seed using random number generator
+
+group <- sample(x = c(1, 2, 3, 4, 5), 
+                size = nrow(background), 
+                replace = T) 
+
+background_train <- background[group != 1, ] #make a train set of ~80 percent
+background_test <- background[group == 1, ] #make a test set of ~20 percent
+```
+
+
+Process combined presence and background training points to extract the values for all predictor variables.
+
+```{r}
+set.seed(100) # decided this seed using random number generator
+
+# combine training points
+train <- rbind(presence_train, background_train) 
+
+# col of ones and zeros representing presence or background
+pb_train <- c(rep(1, nrow(presence_train)), rep(0, nrow(background_train))) 
+
+# extract raster values for training background and presence
+environ_train <- raster::extract(predictors, train) 
+
+# add presence/background column
+environ_train <- cbind(presence_background = pb_train, environ_train) %>% 
+  data.frame() %>% # make into a data frame
+  mutate(Biome = factor(Biome)) # make sure the Biome variable is still a factor
+
+presence_test <- raster::extract(predictors, presence_test) %>%
+  data.frame() %>%
+  mutate(Biome = factor(Biome))
+
+background_test <- raster::extract(predictors, background_test) %>%
+  data.frame() %>%
+  mutate(Biome = factor(Biome))
+
+# remove any NAs
+presence_test <- presence_test[complete.cases(presence_test),] 
+background_test <- background_test[complete.cases(background_test),]
+environ_train <- environ_train[complete.cases(environ_train),] 
+```
+
+So now we have three large dataframes to work with:
+
+* presence_test
+* background_test
+* environ_train
+
+3. Look at the first few rows of each data frame using the head() function:
+
+```{r}
+head(presence_test)
+```
+
+```{r}
+head(background_test)
+```
+
+```{r}
+head(environ_train)
+```
+
+4. How many columns does each data frame have? Why do you think there is an extra column in environ_train?  
+presence_test and background_test have 9 columns, while environ_train has 10 columns. The extra column is presence_background, which indicates whether a point is a presence (1) or background (0). 
+
+
+## 1.7 Fitting a Random Forest model  
+
+Now we're finally ready to fit a model using a random forest algorithm. Ignore the warning message with a question about whether we want to do regression (unless you want to try a classification model too and compare them).
+
+```{r}
+# Saving the model to input into the randomForest() function
+model1 <- presence_background ~  Biome + AnnualMeanTemp + AnnualPrecip + PrecipWettestQuarter + PrecipDriestQuarter + MaxTempWarmestMonth + MinTempColdestMonth + TempAnnualRange + MeanTempWettestQuarter
+
+rf_model <- randomForest(model1, # model specifies response variable and predictor variables
+                         data = environ_train, # the data frame of training data
+                         coob = TRUE) # calculates the "out of bag" error
+
+rf_model
+```
+
+5. How many trees were created to make the "forest"?  
+500 trees were created.
+
+6. How many variables were randomly selected and compared at each split when building the trees?  
+3 variables were tried at each split.
+
+7. What percentage of the variation is explained by the model (the combined voting of the 500 trees)?
+6.45% of the variation is explained by the model.
+
+
+### 1.7.1 Assessing model performance with the test data  
+
+Let's look at how good its predictions are in cases where we know that the sloths were present and at background locations.
+
+```{r}
+# These two lines fix an error in which R decided that the df was not in 
+# the right format for the predict function
+presence_test <- rbind(environ_train[1, -1] , presence_test)
+presence_test <- presence_test[-1, ]
+
+# The base R predict function let's us use any model to make predictions from new data 
+predict_test_presence <- predict(object = rf_model,
+                                 newdata = presence_test)
+
+# Again, these two lines fix an error in which R decided that the df was not in
+# the right format for the predict function
+background_test <- rbind(environ_train[1, -1] , background_test)
+background_test <- background_test[-1, ]
+    
+predict_test_background <- predict(object = rf_model,
+                                 newdata = background_test)
+
+# Let's combine these predictions so we can plot them
+predict_test_presence <- data.frame(prediction = predict_test_presence) %>%
+  mutate(presence_background = 1)
+
+predict_test_background <- data.frame(prediction = predict_test_background) %>%
+  mutate(presence_background = 0)
+
+rf_predictions <- rbind(predict_test_presence, predict_test_background)
+```
+
+8. Look at the structure of rf_predictions using the head() function:
+
+```{r}
+head(rf_predictions)
+```
+
+9. Now make boxplots comparing the predictions for presence test points and background test points. Remember to use factor(presence_background) rather than just presence_background or R will treat it as a number:
+
+```{r}
+rf_predictions %>% 
+  ggplot() +
+  geom_boxplot(aes(x = factor(presence_background), y = prediction))
+
+# This is what the box plot is supposed to look like
+```
+
+10. How do the distributions compare between test presence and test background points?  
+The test presence points (for which presence_background = 1) have a higher median than the test background points (for which presence_background = 0) do, and also a wider IQR.
+
+11. What are the two medians? Do they surprise you?  
+The median for test presence points is somewhere between 0.125 and 0.25 percent chance to find a sloth at that point in the data that was held out for testing, while the median for test background points is about 0%. (It can be greater than 0 because some of the background points may have actually contained sloths.) This difference in medians is expected, and in the correct direction, so that is good. We would expect 0 probability to find sloths in background points, and some probability to find sloths in presence points.
+
+
+One downside of using randomly chosen background points is that we very likely chose some locations where sloths actually do live. This overlap makes our model more conservative and less likely to predict a presence. However, it can still give us useful information about where occurrences are most likely. Let's visualize that.
+
+
+### 1.7.2 Plotting the predictions across the landscape  
+
+Now we're going to use a different predict function, this time from the raster package, but it also applies a model to new data. In this case, the new data are in the form of a raster stack and the predictions are returned as a raster layer. 
+
+```{r}
+predictions_rf_model <- predict(predictors, rf_model, ext = extent(predictors)) 
+```
+
+We can plot that layer. We can also plot the occurrence and background points on top of it to assess whether it seems reasonable.
+
+```{r}
+if (!dir.exists("BV_figures")){
+  dir.create("BV_figures")
+}
+
+# We set the location to save the plot
+png(filename = 'BV_figures/BV_predictions_rf.png',pointsize=5, width=2800, height=2000, res=800)
+# Then we make the plot
+plot(predictions_rf_model, main = 'Random Forest predicted probabilities')
+points(background, col = 'red', pch = 16, cex = 0.2)
+points(occurrence, col = 'black', pch = 16, cex = 0.2)
+```
+
+12. Look in the new BV_figures folder at the plot we just made. How do the predicted probabilities compare to the actual occurrences?  
+The areas with high predicted probability of observing sloths (the green areas) coincide with the actual occurrences of sloths (the black points), but there are green areas where there haven't been sloth observations which is a promising sign that it isn't overfit.
+
+Sometimes to get a better sense of the distribution of probabilities when most probabilities are very low, it's helpful to use a complementary log log (cloglog) transformation. Let's see how that affects the map:
+
+```{r}
+# transforming probabilities
+predictions_rf_cloglog <- log(-log(1 - predictions_rf_model))
+
+# We set the location to save the plot
+png(filename = 'BV_figures/BV_predictions_rf_cloglog.png',pointsize=5, width=2800, height=2000, res=800)
+# Then we make the plot
+plot(predictions_rf_cloglog, main='Random Forest cloglog')
+points(background, col='red', pch = 16,cex=.2)
+points(occurrence, col='black', pch = 16,cex=.2)
+```
+
+13. Look at the new BV_predictions_rf_cloglog.png file. Based on this, where are some locations that the model predicts are suitable for sloths outside of their known range (outside of the locations where the occurrence points are)?  
+There's a patch of high probability for sloth occurrence (with no black points inside, i.e. outside of the sloths' known range) at about (8N, 60W). There are also some green patches in the bottom right corner of the map.
+
+
+## 1.8 Fitting a Maximum Entropy Model  
+
+Now let's try a different machine learning algorithm. This MaxEnt algorithm is the most popular algorithm for species distribution modeling.
+
+ENMevaluate is a function in the ENMeval package that both fits and evaluates many different species distribution models, including MaxEnt models. We will be running the R version of MaxEnt, which was named maxnet (I know- it's confusing!). The model will be run and tested on different subsets of the data. Below I used the "block" option which does this by spatially partitioning the data. Then we have to set tuning parameters. The tuning parameters are:
+
+* fc for feature classes to include in the models
+* rm for regularization multiplier, which penalizes the model for being too complex (lower regularization multipliers allow more complexity)
+
+14. Skim through these descriptions of the (feature classes)[https://drive.google.com/file/d/1QHvnALCavsdbtsJ3KHnCxhBLgpQqoX0P/view?usp=sharing]. What is the difference between a threshold and a hinge feature?  
+For threshold features, all responses on one side of the knot (the x-axis threshold) are the same value, whereas for hinge features, the responses increase or decrease linearly on one side of the knot.
+
+You can learn more about all of that (here)[https://jamiemkass.github.io/ENMeval/articles/ENMeval-2.0-vignette.html#eval]
+
+Let's fit a very simple set of models so they are easier to interpret (this may take a few minutes):
+
+```{r}
+# I was having trouble getting the ENMevaluate function to recognize that Biome was a factor 
+# when I used the raster stack as input so instead we'll use data frames of environmental values
+occurrence_maxent <- cbind(occurrence, raster::extract(predictors, occurrence)) %>%
+  mutate(Biome = as.factor(Biome))
+background_maxent <- cbind(background, raster::extract(predictors, background)) %>%
+  mutate(Biome = as.factor(Biome))
+
+# Saves a very complex object with lots of data about the fitted models
+eval_maxent_linear <- ENMevaluate(occs = occurrence_maxent,  # occ = occurrences
+                      bg = background_maxent,  # bg = background points
+                      algorithm = 'maxnet',  # we are using the R version of MaxEnt
+                      partitions = 'block',  # the model training is done using spatial blocks
+                      tune.args = list(fc = "L", rm = 1:2))  # restricting to linear models
+                      # fc = c("L","LQ","LQH","H") would mean to fit models with:
+                      # linear, linear+quadratic, linear+quadratic+hinge, and only hinge features
+```
+
+
+### 1.8.1 MaxEnt modeling results  
+
+```{r}
+# Overall results
+res <- eval.results(eval_maxent_linear)
+
+res
+```
+Above you'll see two rows, one for each model that the function fit. 
+
+15. What are the two values in the regularization multiplier (rm) column? Which row has the more complicated model?  
+The regularization multiplier values are 1 and 2. Row 1 has the lower RM value, meaning it has a smaller penalty for model complexity and therefore a more complicated model.
+
+The auc.train column tells us about a value called AUC or (Area Under the Curve)[https://en.wikipedia.org/wiki/Receiver_operating_characteristic#Area_under_the_curve], which refers to a curve with false positive rate on the x-axis and the true positive rate on the y-axis. We won't get into the details of this, but the important thing to remember is that a higher AUC value means the model is better at predicting outcomes. The closer it is to 1, the better the model. Values of 0.8 and above are generally considered to have good predictive power.
+
+16. What are the two AUC values here? Based on that, which is the better model?  
+The AUC values are 0.7954422 and 0.7912692, suggesting that the model in the first row is the better model, as it has the higher AUC.
+
+Another way to assess model fit is to look at the AIC or (Akaike Information Criterion)[https://en.wikipedia.org/wiki/Akaike_information_criterion]. This measure gives a sense of both a model's simplicity and its predictive power. Lower values are considered better. When comparing models, we often use a threshold difference of 2 or more in AIC values to decide whether two models are significantly different in quality.
+
+17. Scroll over to the AICc column. Based on those values, which is the better model? How different are they?  
+The AICc values are 8802.717 and 8821.627, suggesting that the model in the first row is better, since it has the lower AICc value. The models are significantly different in quality because the AICc values have a difference of greater than 2.
+
+
+To select one model, let's choose the model with the lowest AIC value using eval.models to get a list of the two models and [[opt.aicc$tune.args]] to extract that one:
+
+```{r}
+opt.aicc <- res %>% filter(delta.AICc == 0) 
+# whichever model has the lowest AICc will be the model that is used for comparison
+# when calculating the delta.AICc (change in AIC between models)
+
+mod.aicc <- eval.models(eval_maxent_linear)[[opt.aicc$tune.args]]
+
+# We use $betas to get the coefficient estimates from the model
+mod.aicc$betas
+```
+
+These beta values show estimates of the coefficients in the model.
+
+18. Which of the continuous variables (not the biomes) has the coefficient with the largest absolute value? What direction is the effect (does an increase in that variable increase the probability of finding sloths or decrease it)?  
+MaxTempWarmestMonth has the coefficient with the largest absolute value. Its coefficient is in the negative direction, suggesting that an increase in MaxTempWarmestMonth decreases the probability of finding sloths.
+
+
+Now let's plot the effects of the variables:
+
+```{r}
+plot(mod.aicc, type = "cloglog")
+```
+
+19. Based on these plots, how does mean temperature in the wettest quarter of the year affect the probability of sloth presence?  
+The higher the mean temperature in the wettest quarter of the year, the higher the probability of sloth presence. According to the plot, the probability of finding a sloth is 100% at MeanTempWettestQuarter of 30 degrees or above.
+
+
+### 1.8.2 Assessing model performance with the test data  
+
+*Note:* By default, model predictions from maxnet are cloglog transformed probabilities.
+
+```{r}
+maxent_presence_predict <- predict(object = mod.aicc,
+                                   newdata = presence_test) %>%
+                                  data.frame() %>%  # make predictions into a data frame 
+                                  mutate(presence_background = 1)  # add a column
+
+maxent_background_predict <- predict(object = mod.aicc,
+                                   newdata = background_test) %>%
+                                  data.frame() %>%
+                                  mutate(presence_background = 0)
+
+# combine the two data frames
+model_predictions <- rbind(maxent_presence_predict, maxent_background_predict)
+
+# rename the first column for plotting
+names(model_predictions)[1] <- "prediction_cloglog"
+
+# transform the cloglog output back to probabilities
+model_predictions$prediction_prob <- 1 - exp(-exp(model_predictions$prediction_cloglog))
+```
+
+20. Use the head() function to look at the model_predictions data frame:
+
+```{r}
+head(model_predictions)
+```
+
+21. Now use boxplots to compare the distributions of prediction_prob between presence and background points. Remember to use factor(presence_background):
+
+```{r}
+model_predictions %>% 
+  ggplot() +
+  geom_boxplot(aes(x = factor(presence_background), y = prediction_prob))
+```
+
+22. How does this compare to the Random Forest model predictions?  
+Compared to the Random Forest model predictions (problem 9), the presence points have much lower predicted probabilities- almost equal to 0.
+NOTE: the transform in MaxEnt is not actually cloglog, so the "untransformed" predicted probabilities are lower than they should be. However, the proportions of the probabilities have been preserved. These proportions look similar to the boxplot from problem 9, although the data for the presence and background are more similar than they should be. We want the presence and background to be as different as possible. Background =/= absence, so there should be variability (hence the outliers), but the background median should be lower. For the presence, the median should be higher and there should be less variability.
+This boxplot doesn't necessarily suggest that the MaxEnt model is worse than the Random Forest model.
+ 
+
+### 1.8.3 Plotting predictions across the landscape  
+
+Now we can plot the cloglog scores:
+
+```{r}
+predictions_maxent_model <- raster::predict(predictors, 
+                                        mod.aicc, 
+                                        ext = raster::extent(predictors))
+
+
+png(filename = 'BV_figures/BV_predictions_maxent.png',pointsize=5, width=2800, height=2000, res=800)
+plot(predictions_maxent_model, main='maximum entropy cloglog')
+points(background, col='red', pch = 16,cex=.2)
+points(occurrence, col='black', pch = 16,cex=.2)
+```
+
+23. Look at the BV_predictions_maxent.png file. How does this compare to the Random Forest cloglog map?  
+Compared to BV_predictions_rf_cloglog.png, the cloglog scores in the MaxEnt model are generally closer together. This is because the MaxEnt model was fit with only linear models (line 411); if it weren't constricted to a linear model, the values might be more dissimilar, as they are in the Random Forest model. (The relationship between two variables is easier to interpret in linear models than in more complicated models.)
+
+```{r}
+evaluate(presence_test, background_test, mod.aicc)
+
+evaluate(presence_test, background_test, rf_model)
+```
+The last output: recommended threshold. The threshold at which the model gives the best rates of identification (true positive and true negative rates are optimized) based on the test data. You can use these thresholds for code like in the last part of this in-class activity when calculating the amount of suitable land for the sloths.
+
+
+## 1.9 Calculating area of regions above a suitability threshold  
+
+One thing we may want to do once we have these maps is quantify how much land is above a certain threshold of suitability. This is especially useful for comparing current and future species ranges. Below I give an example of how to do this with a threshold score of -9 (getting the area in km^2 of all grid squares with that score or higher).
+
+The approach below is modified from source code found at:
+Otto, S. (2022): Caucasian Spiders. A faunistic database on the spiders of the Caucasus. Version 02.2022 Internet: https://caucasus-spiders.info/
+
+```{r}
+# Area calculation
+
+# save and then modify full raster
+predictions_neg9 <- predictions_maxent_model
+predictions_neg9[predictions_neg9 <= -9] <- NA
+
+# get sizes of all cells with suitability over -9
+cell_size <- area(predictions_neg9, 
+                  na.rm = TRUE, 
+                  weights = FALSE)
+
+# delete any NAs from vector of all raster cells
+cell_size <- cell_size[!is.na(cell_size)]
+
+# compute area [km2] of all cells in prediction_over50
+suitable_area_neg9 <- length(cell_size)*mean(cell_size)
+
+suitable_area_neg9
+```
+
+23. Try doing the same thing with a threshold score of -10 instead:
+
+```{r}
+# Area calculation
+
+# save and then modify full raster
+predictions_neg10 <- predictions_maxent_model
+predictions_neg10[predictions_neg10 <= -10] <- NA
+
+# get sizes of all cells with suitability over -10
+cell_size <- area(predictions_neg10, 
+                  na.rm = TRUE, 
+                  weights = FALSE)
+
+# delete any NAs from vector of all raster cells
+cell_size <- cell_size[!is.na(cell_size)]
+
+# compute area [km2] of all cells in prediction_over50
+suitable_area_neg10 <- length(cell_size)*mean(cell_size)
+
+suitable_area_neg10
+```
+Area calculation for Random Forest model, using the threshold of 0.0562, in order to compare the area predicted by each model to be suitable habitat for sloths:
+```{r}
+# Area calculation
+
+# save and then modify full raster
+predictions_rf_0.0562 <- predictions_rf_model
+predictions_rf_0.0562[predictions_rf_0.0562 <= 0.0562] <- NA
+
+# get sizes of all cells with suitability over 0.0562
+cell_size <- area(predictions_rf_0.0562, 
+                  na.rm = TRUE, 
+                  weights = FALSE)
+
+# delete any NAs from vector of all raster cells
+cell_size <- cell_size[!is.na(cell_size)]
+
+# compute area [km2] of all cells in prediction_over50
+suitable_area_rf_0.0562 <- length(cell_size)*mean(cell_size)
+
+suitable_area_rf_0.0562
+```
+The Random Forest model predicts that an area of 1891566 km^2 is suitable habitat, while the MaxEnt model at threshold = -9 predicted that an area of 2369263 km^2 was suitable.
