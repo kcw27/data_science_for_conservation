@@ -1,0 +1,303 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## 1.1 File metadata 
+
+Script written by Katie Wang, modified from code by Morgan Carr-Markell. 
+Created on March 28, 2023.  
+
+
+## 1.2 Data sources
+
+* Species occurrence data:  
+
+GBIF.org (03 April 2023) GBIF Occurrence Download  https://doi.org/10.15468/dl.nepwjz
+
+* Environmental data:  
+
+Tyberghein L, Verbruggen H, Pauly K, Troupin C, Mineur F, De Clerck O (2012) Bio-ORACLE: A global environmental dataset for marine species distribution modelling. Global Ecology and Biogeography, 21, 272–281.
+
+Assis, J., Tyberghein, L., Bosh, S., Verbruggen, H., Serrão, E. A., & De Clerck, O. (2017). Bio-ORACLE v2.0: Extending marine data layers for bioclimatic modelling. Global Ecology and Biogeography.
+
+## 1.3 Code sources
+
+Code is inspired by or modified from the following sources:
+
+The Banta Lab - Tutorials. (n.d.). Sites.google.com. Retrieved April 15, 2023, from https://sites.google.com/site/thebantalab/tutorials?authuser=0
+
+Gee, A., Adolph, S., Furman, D., & Halvorsen, S. (2019). (Re)Searching for an Answer | Summer 2019. Harvey Mudd College Magazine. https://magazine.hmc.edu/summer-2019/researching-for-an-answer/
+
+Kass, J. M., Muscarella, R., Pinilla-Buitrago, G. E., & Galante, P. J. (2023, January 9). ENMeval 2.0 Vignette. Jamiemkass.github.io. https://jamiemkass.github.io/ENMeval/articles/ENMeval-2.0-vignette.html
+
+Watt, D. (2018, October 9). Preparing Data for MaxEnt Species Distribution Modeling Using R. Azavea. https://www.azavea.com/blog/2018/10/09/preparing-data-for-maxent-species-distribution-modeling-using-r/
+
+## 1.4 Libraries
+
+```{r, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(geodata)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+```
+
+
+## 2 Processing occurrence data
+
+### 2.1 Loading occurrence data
+
+Callinectes sapidus occurrence data was downloaded from GBIF and read in as CS_occurrences_df. This download includes only human observations of C. sapidus made after 1950 with coordinates included. As coordinate data is the only data necessary for this analysis, only the decimalLongitude and decimalLatitude columns were selected.
+
+```{r}
+CS_occurrences_df <- read.csv("data/Callinectes_sapidus_0141269-230224095556074.csv",
+                              sep = "\t")
+
+CS_occurrences_df <- CS_occurrences_df %>%
+  dplyr::select(decimalLongitude, decimalLatitude)
+```
+
+
+### 2.2 Inspecting and filtering occurrence data
+
+C. sapidus occurrence data was visually inspected for coordinate outliers An sf object, crab_sf, was created from CS_occurrences_df so that all occurrences could be plotted on the world map from the rnaturalearth package. The coordinate reference system (CRS) for the crab_sf object was set as WGS84. Observations in the Pacific Ocean and the Indian Ocean appeared to be outliers, so they were filtered from CS_occurrences_df, meaning that crab_sf had to be remade for subsequent plotting of occurrences. 
+
+```{r}
+# creating and plotting sf objects
+worldMap <- ne_countries(scale = "medium", type = "countries", returnclass = "sf")
+
+crab_sf <- st_as_sf(CS_occurrences_df,
+                     coords = c("decimalLongitude", "decimalLatitude"),
+                     crs = 4326) # WGS84
+
+ggplot() +
+  geom_sf(data = worldMap) +
+  geom_sf(data = crab_sf)
+```
+
+```{r}
+# check size of CS_occurrences_df before filtering
+CS_occurrences_df %>%
+  nrow()
+
+# filtering outliers
+CS_occurrences_df <- CS_occurrences_df %>%
+  filter(decimalLongitude > -100 & decimalLongitude < 35)
+
+crab_sf <- st_as_sf(CS_occurrences_df,
+                     coords = c("decimalLongitude", "decimalLatitude"),
+                     crs = 4326)
+
+# check size of CS_occurrences_df after filtering
+CS_occurrences_df %>%
+  nrow()
+
+# redrawing the map to check the crop
+ggplot() +
+  geom_sf(data = worldMap) +
+  geom_sf(data = crab_sf)
+
+# successfully cropped
+```
+Only three occurrences were filtered out. That suggests that the outliers were misidentifications rather than offshoot populations of C. sapidus.
+
+### 2.3 Saving spatial extent
+
+Saved a buffer around the occurrence points, as well as a bounding box around that buffer. The buffer will be used to generate background points (refer to section 5.1). The bounding box will be used to crop the environment raster layers to the bounds of the occurrences (refer to section 3.3.3).
+
+#### 2.3.1 Saving a buffer around occurrence points
+
+First, the occurrence points in crab_sf are converted from degrees to meters by changing the CRS from WGS84 to Eckert IV. WGS84 is in terms of latitude and longitude, with units of degrees, while Eckert IV is an equal-area projection which is in terms of meters, which is better for drawing a buffer. Next, a buffer of 500 kilometers is drawn around the occurrence points. Finally, the crs is re-projected back to WGS84 so that it is consistent with all the other sf objects. A visual check is performed to confirm that the buffer was successfully created.
+
+```{r}
+# Define a typical Eckert IV projection
+eckertIV <- "+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+
+# Generate a buffer around the occurrence points
+crab_occurrences_buffer <- crab_sf %>%
+  st_transform(crs = eckertIV) %>% # Transform from WGS84 to Eckert IV
+  st_buffer(dist = 500000) %>%  # unit here is meters
+  st_union() %>% # polygons are unioned together for visualization
+  st_sf() %>% # convert back to a form usable by the raster package
+  st_transform(crs = 4326) # re-project to WGS84, for which crs = 4326
+
+plot(crab_occurrences_buffer, border = "blue", lwd = 3)
+```
+
+#### 2.3.2 Generating a bounding box around occurrence points
+
+The buffer is used to generate a bounding box. 
+
+```{r}
+crab_occurrence_bounds <- crab_occurrences_buffer %>%
+  st_bbox()
+```
+
+
+## 3 Environmental data
+
+### 3.1 Loading environmental predictor variable layers
+
+To model habitat suitability for C. sapidus, TIFF Raster data on present and future (2040-2050 RCP85) marine climate conditions was downloaded from [Bio-ORACLE](https://www.bio-oracle.org/downloads-to-email.php). Data was downloaded for benthic layers at maximum depth, as crabs live on the ocean floor. The environmental predictors chosen for C. sapidus presence were the Lt. Min (average of the minimum records per year) for both temperature (Celsius) and salinity (PSS) because low temperature and low salinity are the major causes of overwinter mortality in the crabs (Bauer and Miller 2010).
+
+```{r}
+present_temp <- raster("data/Present.Benthic.Max.Depth.Temperature.Lt.min.tif")
+present_salinity <- raster("data/Present.Benthic.Max.Depth.Salinity.Lt.min.tif")
+future_temp <- raster("data/2050AOGCM.RCP85.Benthic.Max.Depth.Temperature.Lt.min.tif.BOv2_1.tif")
+future_salinity <- raster("data/2050AOGCM.RCP85.Benthic.Max.Depth.Salinity.Lt.min.tif.BOv2_1.tif")
+```
+
+
+### 3.2 Inspecting and processing environmental predictor variable layers
+
+#### 3.2.1 Visual inspection of environmental predictor variable layers
+
+The plot() function from base R is used to visualize the environmental raster layers so that hypotheses can be drawn about how projected climate change will affect species distribution.
+
+```{r}
+plot(present_temp)
+plot(future_temp)
+plot(present_salinity)
+plot(future_salinity)
+```
+
+
+### 3.2.2 Standardardizing crs, resolution, and spatial extent as needed
+
+The four raster layers are shown to have WGS84 (4326) as their CRS. Since they are already consistent with crab_sf, there is no need to convert them.  
+All of the raster layers have a resolution of (0.08333333, 0.08333333). Since they are all the same, there is no need to convert them all to the resolution of the raster layer with the lowest resolution.  
+The raster layers have an extent of -180, 180, -90, 90  (xmin, xmax, ymin, ymax).
+
+```{r}
+present_temp
+future_temp
+present_salinity
+future_salinity
+```
+
+#### 3.2.2.1 Cropping the spatial extent
+
+Because the environmental layers extend beyond the saved occurrence bounds, they are all cropped to the occurrence bounds.
+
+```{r}
+present_temp <- present_temp %>%
+  crop(crab_occurrence_bounds)
+
+future_temp <- future_temp %>%
+  crop(crab_occurrence_bounds)
+
+present_salinity <- present_salinity %>%
+  crop(crab_occurrence_bounds)
+
+future_salinity <- future_salinity %>%
+  crop(crab_occurrence_bounds)
+```
+
+Checking the new extent of the environmental layers:
+```{r}
+present_temp
+future_temp
+present_salinity
+future_salinity
+```
+
+
+### 3.3 Creating a raster stack
+
+A raster stack of the environmental layers is created. The fact that it was successfully created confirms that the crs, resolutions, and extents are consistent across all of the raster layers.
+
+```{r}
+crab_stack <- stack(list(present_temp,
+           future_temp,
+           present_salinity,
+           future_salinity))
+```
+
+
+### 3.4 Exporting the processed raster layers as geoTIFF files
+
+The processed raster layers are exported to the processed_data folder. These will be used as inputs for species_distribution_modeling.Rmd.
+
+```{r}
+if (!dir.exists("processed_data")){
+  dir.create("processed_data")
+}
+
+file_names <- paste0("processed_data/", names(crab_stack))
+
+writeRaster(crab_stack, 
+            filename = file_names,
+            format = "Gtiff",  # specify output format
+            bylayer = TRUE,
+            overwrite = TRUE, # CAUTION: if this is true, it will overwrite an existing file
+            NAflag = -9999)
+```
+
+
+## 4 Dealing with spatial autocorrelation
+
+This block of code deals with spatial autocorrelation, which is a bias that is introduced when nearby observations have similar values. In this case, the objective is to have only one occurrence in each grid cell of an environmental raster layer. Thus, if there are cell duplicates (i.e. multiple occurrences in the same grid cell), only one occurrence for that grid cell is kept.  
+An environmental layer is arbitrarily chosen as the reference for grid cells. Since the environmental layers have been standardized, they are all functionally identical for this step.
+
+```{r}
+occurrence_cells <- raster::extract(present_temp, # one of the environmental layers
+                            CS_occurrences_df,
+                            cellnumbers = TRUE)
+occurrence_cellDups <- duplicated(occurrence_cells[ , 1])
+CS_occurrences_df <- CS_occurrences_df[!occurrence_cellDups, ]
+```
+
+
+## 5 Background points
+Background data establishes the physical boundaries of the study. That is, given that the species was observed at these given occurrence points, where could the species disperse to if the only limiting factor was distance and not any environmental predictors? Then, points within this area are randomly sampled in order to provide background points, which may coincide with actual occurrence points (also known as presence points) but generally will not. The distance boundaries for background points were defined earlier when crab_occurrences_buffer was created.
+
+### 5.1 Generating background
+
+An envs_background raster object is created by cropping any one of the environmental raster layers (in this case, present_temp) with the crab_occurrences_buffer. Then 10,000 points are randomly sampled from envs_background to serve as background points, stored in background_df.  
+The background points only occur in water, as the environmental layer used to create envs_background only contains marine cells. This is good, because C. sapidus cannot disperse to land.
+
+```{r}
+# Crop environmental raster to match the study extent
+envs_background <- raster::crop(present_temp, crab_occurrences_buffer)
+
+# Next, mask the raster to the shape of the buffers
+envs_background  <- raster::mask(envs_background, crab_occurrences_buffer)
+
+# Plot the occurrence points on the area eligible to contain background points
+plot(envs_background, main = "Annual Lowest Mean Temperature")
+points(CS_occurrences_df[ , c("decimalLongitude", "decimalLatitude")])
+plot(crab_occurrences_buffer, border = "blue", lwd = 3, add = TRUE)
+
+# Randomly sample background points and save to background_df
+background_df <- dismo::randomPoints(envs_background, n = 10000) %>% as.data.frame()
+colnames(background_df) <- colnames(CS_occurrences_df)
+```
+
+### 5.2 Plotting occurence and background points
+
+On any one of the environmental layers, background points are plotted in black and thinned occurrence points in red on top. This is to verify that the background points are within the buffer and only occur in the water.
+
+```{r}
+plot(present_temp, main = "Annual Lowest Mean Temperature")
+points(background_df, pch = 20, cex = 0.2)  # default color is black
+points(CS_occurrences_df, col = "red", pch = 20, cex = 0.2)
+# To add sf objects to a plot, use add = TRUE
+plot(crab_occurrences_buffer, border = "blue", lwd = 3, add = TRUE)
+```
+
+### 5.3 Writing out points
+
+write.csv() is used to save the occurrence_df and background_df in the processed_data folder. Set row.names = FALSE.
+
+```{r}
+write.csv(CS_occurrences_df,
+          file = "processed_data/CS_occurrences.csv",
+          row.names = FALSE)
+
+write.csv(background_df,
+          file = "processed_data/background.csv",
+          row.names = FALSE)
+```
