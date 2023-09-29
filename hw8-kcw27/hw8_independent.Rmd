@@ -1,0 +1,436 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## 1.1 File metadata  
+
+Template author: Morgan Carr-Markell  
+Template last modified on: April 4, 2023  
+Notebook modified by: Katie Wang  
+Notebook last modified on: April 11, 2023
+
+
+## 1.2 Data sources  
+
+1. Fill in your data sources:
+* Species occurrence data:  
+
+GBIF.org (03 April 2023) GBIF Occurrence Download  https://doi.org/10.15468/dl.nepwjz
+
+* Environmental data:  
+
+Tyberghein L, Verbruggen H, Pauly K, Troupin C, Mineur F, De Clerck O (2012) Bio-ORACLE: A global environmental dataset for marine species distribution modelling. Global Ecology and Biogeography, 21, 272–281.
+
+Assis, J., Tyberghein, L., Bosh, S., Verbruggen, H., Serrão, E. A., & De Clerck, O. (2017). Bio-ORACLE v2.0: Extending marine data layers for bioclimatic modelling. Global Ecology and Biogeography.
+
+## 1.3 Code sources  
+
+Much of the code is inspired by or directly adapted from these four sources:
+
+The ENMeval 2.0 Vignette
+By Jamie M. Kass, Robert Muscarella, Gonzalo E. Pinilla-Buitrago, and Peter J. Galante
+Date: January 9th, 2023
+https://jamiemkass.github.io/ENMeval/articles/ENMeval-2.0-vignette.html
+
+Preparing Data for MaxEnt Species Distribution Modeling Using R
+By Dale Watt
+Date: October 9th, 2018
+https://www.azavea.com/blog/2018/10/09/preparing-data-for-maxent-species-distribution-modeling-using-r/
+
+Tutorials from The Banta Lab
+By Josh Banta
+https://sites.google.com/site/thebantalab/tutorials?authuser=0
+
+Code shared by Prof. Stephen Adolph and his students Daniel Furman and Sarah Halvorsen from their desert night lizard species distribution modeling project
+https://magazine.hmc.edu/summer-2019/researching-for-an-answer/
+
+
+## 1.4 Libraries   
+
+```{r, message = FALSE}
+library(tidyverse)    # wrangle data
+library(sf)           # vector data
+library(dismo)        # species distribution modeling
+library(rgdal)        # projections and geospatial functions
+library(raster)       # raster data
+library(rJava)        # R to Java interface
+library(maptools)     # helps with manipulating geographic data
+library(sp)           # classes for manipulating spatial data
+library(rgeos)        # interface to geometry engine
+library(randomForest) # classification and regression random forest models
+library(ipred)        # improved prediction using techniques such as bagging
+library(ENMeval)      # MaxEnt modeling
+```
+
+
+## 1.5 Read in data  
+
+### 1.5.1 Responses (points):  
+
+2. Read in your point data (csv files):
+
+```{r}
+setwd('..') # move up a directory; I'm using the processed data files I exported during HW7
+
+occurrence <- read.csv("hw7-kcw27/processed_data/CS_occurrences.csv")
+
+background <- read.csv("hw7-kcw27/processed_data/background.csv")
+```
+
+### 1.5.2 Environmental predictor variables (rasters):  
+
+3. Read in your environmental layers and make a raster stack:
+
+```{r}
+setwd('..') # move up a directory; I'm using the processed data files I exported during HW7
+
+# I think that when these files were exported from HW7, the .tif file extension replaced whatever came after the
+# last period in the file name
+
+# I'll make two raster stacks: one for the present climate and one for the future climate
+
+# Get raster file list
+predictor_list_present <- c("hw7-kcw27/processed_data/Present.Benthic.Max.Depth.Temperature.Lt.tif",
+                    "hw7-kcw27/processed_data/Present.Benthic.Max.Depth.Salinity.Lt.tif")
+predictor_list_future <- c("hw7-kcw27/processed_data/X2050AOGCM.RCP85.Benthic.Max.Depth.Temperature.Lt.min.tif.tif",
+                           "hw7-kcw27/processed_data/X2050AOGCM.RCP85.Benthic.Max.Depth.Salinity.Lt.min.tif.tif")
+
+# Make raster stack from files
+predictors_present <- stack(predictor_list_present)
+predictors_future <- stack(predictor_list_future)
+
+predictors_present
+predictors_future
+```
+
+
+## 1.6 Processing data  
+
+### 1.6.1 Renaming layers in stack  
+
+4. Look at the raster file names and then rename the raster stack layers accordingly:
+
+```{r}
+# the names were "layer.1" and "layer.2" so I need to rename them
+# to confirm the ordering of the raster layers:
+predictor_list_present
+predictor_list_future
+
+# The names of the variables need to be the same so that the model recognizes them
+# Or maybe it goes off the order of variables, since when the predictors had different
+# names, it didn't give me an error
+names(predictors_present) <- c("Temperature", "Salinity")
+names(predictors_future) <- c("Temperature", "Salinity")
+
+# check that the raster layers have been renamed
+predictors_present
+predictors_future
+```
+
+
+### 1.6.2 Categorical variables  
+
+5. If any of your raster layers are categorical, convert them to factors (so they aren't treated as numbers):
+
+```{r}
+# none are categorical
+```
+
+
+### 1.6.3 Extracting environmental variables for each point  
+
+6. Use raster::extract() to extract the raster values for your occurrence points and background points:
+
+```{r}
+presence_values_present <- raster::extract(predictors_present, occurrence)
+background_values_present <- raster::extract(predictors_present, background)
+
+presence_values_future <- raster::extract(predictors_future, occurrence)
+background_values_future <- raster::extract(predictors_future, background)
+```
+
+7. What are the dimensions of these 2 matrices?  
+The presence values matrices have 2036 rows and 2 columns. The background values matrices have 10000 rows and 2 columns. These matrices are made in order to demonstrate how the raster::extract() function works, since it's used later on.
+
+
+### 1.6.4 Dividing the points into training and testing sets  
+
+8. Process presence points into a training set to train the model and a held-out test set to assess how well the model predicts areas with high and low suitability for this species.
+
+```{r}
+set.seed(100) # decided this seed using random number generator
+
+group <- sample(x = c(1, 2, 3, 4, 5), # we want to assign group numbers
+                size = nrow(occurrence), # to each row (observation)
+                replace = T) # this means it will keep randomly drawing 1-5
+
+presence_train <- occurrence[group != 1, ] # make a training set of ~80 percent
+presence_test <- occurrence[group == 1, ] # make a testing set of ~20 percent
+```
+
+
+9. Process background points in the same way.
+
+```{r}
+set.seed(100) # decided this seed using random number generator
+
+group <- sample(x = c(1, 2, 3, 4, 5), 
+                size = nrow(background), 
+                replace = T) 
+
+background_train <- background[group != 1, ] #make a train set of ~80 percent
+background_test <- background[group == 1, ] #make a test set of ~20 percent
+```
+
+
+10. Process combined presence and background training points to extract the values for all predictor variables.
+
+```{r}
+set.seed(100) # decided this seed using random number generator
+
+# combine training points
+train <- rbind(presence_train, background_train) 
+
+# col of ones and zeros representing presence or background
+pb_train <- c(rep(1, nrow(presence_train)), rep(0, nrow(background_train))) 
+
+# extract raster values for training background and presence
+environ_train_present <- raster::extract(predictors_present, train)
+
+# add presence/background column
+environ_train_present <- cbind(presence_background = pb_train, environ_train_present) %>% 
+  data.frame() # make into a data frame
+
+presence_test_present <- raster::extract(predictors_present, presence_test) %>%
+  data.frame()
+
+background_test_present <- raster::extract(predictors_present, background_test) %>%
+  data.frame()
+
+# remove any NAs
+presence_test_present <- presence_test_present[complete.cases(presence_test_present),]
+
+background_test_present <- background_test_present[complete.cases(background_test_present),]
+
+environ_train_present <- environ_train_present[complete.cases(environ_train_present),] 
+
+# edit: deleted all the _future versions of the three because for the future we only need the raster climate layer
+```
+
+
+11. Look at the first few rows of each data frame using the head() function to check your work:
+
+```{r}
+head(presence_test_present)
+```
+
+```{r}
+head(background_test_present)
+```
+
+```{r}
+head(environ_train_present)
+```
+
+
+12. For the sake of time, decide whether you want to fit a model using the Random Forest algorithm or the MaxEnt algorithm. Either is fine. If you fit a MaxEnt model, you will need to provide tuning parameters and then select the model with the lowest AIC value.  
+I will fit a Random Forest model.
+
+
+## 1.7 Fitting a model  
+
+13. Fit the model:
+
+```{r}
+# Saving the model to input into the randomForest() function
+model_present <- presence_background ~  Temperature + Salinity
+
+rf_model_present <- randomForest(model_present, # model specifies response variable and predictor variables
+                         data = environ_train_present, # the data frame of training data
+                         coob = TRUE) # calculates the "out of bag" error
+
+rf_model_present
+
+# edit: there shouldn't be a model for the future; deleted these lines
+```
+
+
+### 1.7.1 Assessing model performance with the test data  
+
+14. Make a data frame of model predictions using the held-out test data:
+
+```{r}
+# These lines fix an error in which R decided that the df was not in 
+# the right format for the predict function
+presence_test_present <- rbind(environ_train_present[1, -1] , presence_test_present)
+presence_test_present <- presence_test_present[-1, ]
+
+# The base R predict function let's us use any model to make predictions from new data 
+predict_test_presence_present <- predict(object = rf_model_present,
+                                 newdata = presence_test_present)
+
+# Again, these lines fix an error in which R decided that the df was not in
+# the right format for the predict function
+background_test_present <- rbind(environ_train_present[1, -1] , background_test_present)
+background_test_present <- background_test_present[-1, ]
+
+    
+predict_test_background_present <- predict(object = rf_model_present,
+                                 newdata = background_test_present)
+
+# Let's combine these predictions so we can plot them
+predict_test_presence_present <- data.frame(prediction = predict_test_presence_present) %>%
+  mutate(presence_background = 1)
+
+predict_test_background_present <- data.frame(prediction = predict_test_background_present) %>%
+  mutate(presence_background = 0)
+
+rf_predictions_present <- rbind(predict_test_presence_present, predict_test_background_present)
+
+# also deleted the future versions of variables here
+```
+
+15. Now make box plots comparing the predictions for presence test points and background test points. Remember to use factor(presence_background) rather than just presence_background or R will treat it as a number:
+
+```{r}
+rf_predictions_present %>% 
+  ggplot() +
+  geom_boxplot(aes(x = factor(presence_background), y = prediction))
+```
+
+16. How do the distributions compare between test presence and test background points?  
+As we expect, the test background presence points have great variability and a median near zero, while the test presence points have a higher median and less variation about the median.
+
+
+### 1.7.2 Plotting the predictions across the landscape  
+
+17. Use the raster::predict function to save predictions across the landscape: 
+
+```{r}
+predictions_rf_model_present <- raster::predict(predictors_present, 
+                                                rf_model_present, 
+                                                ext = raster::extent(predictors_present)) 
+
+# for the future, use the model you trained on the present data
+predictions_rf_model_future <- raster::predict(predictors_future, # same variable names as _present but different raster data
+                                                rf_model_present, 
+                                                ext = raster::extent(predictors_future))
+
+# For the final version of the code, I'll change ext to a set of coordinates to bound European waters
+```
+
+18. Plot that layer and also plot the occurrence and background points on top of it to assess whether it seems reasonable:
+
+```{r}
+if (!dir.exists("figures")){
+  dir.create("figures")
+}
+
+# Set the location to save the plot
+png(filename = 'figures/predictions_present.png',pointsize=5, width=2800, height=2000, res=800)
+# Then make the plot
+plot(predictions_rf_model_present, main = 'Random Forest predicted probabilities')
+points(background, col = 'red', pch = 16, cex = 0.2)
+points(occurrence, col = 'black', pch = 16, cex = 0.2)
+```
+
+
+```{r}
+# a copy without points so it's easier to see the predicted probabilities
+png(filename = 'figures/predictions_present_no_points.png',pointsize=5, width=2800, height=2000, res=800)
+# Then make the plot
+plot(predictions_rf_model_present, main = 'Random Forest predicted probabilities')
+```
+
+
+19. Look in the new figures folder at the plot you just made. How do the predicted probabilities compare to the actual occurrences?  
+It's hard to see the predicted probabilities (the gradient from red to green) behind all the red and black points. I can see that the model predicted areas of high probability of observing crabs (the green areas) that don't coincide entirely with the black points (the locations where crab occurrences were observed) so that suggests that the model isn't overfit, which is good.
+
+
+## 1.8 Plotting predictions in another landscape or with future climate projections
+
+### 1.8.1 Read in raster layers and make stack
+
+20. Read in the raster layers for the future climate scenario or other region:
+
+```{r}
+# done earlier
+```
+
+21. Create a raster stack (make sure that the crs, extent, and resolution match first) and rename the layers as you did above:
+
+```{r}
+# done earlier
+```
+
+### 1.8.2 Plotting model predictions 
+
+22. Use the raster::predict function to save the predictions for the new landscape/future climate:
+
+```{r}
+# done in Q17
+```
+
+23. Save a plot of those predictions to a file using the png function (no points to plot on top this time):
+
+```{r}
+png(filename = 'figures/predictions_future.png',pointsize=5, width=2800, height=2000, res=800)
+# Then make the plot
+plot(predictions_rf_model_future, main = 'Random Forest predicted probabilities')
+```
+
+## 1.9 Calculating area of regions above a suitability threshold 
+
+24. Calculate the suitable range above some threshold (you decide on the threshold based on the range of predictions) for both the current range and the range in the future or another region:
+
+```{r}
+# first determine what thresholds to use
+evaluate(presence_test_present, background_test_present, rf_model_present)
+
+# should use the same threshold for both the present and future models for consistency
+(0.130187 + 0.1492) / 2
+```
+```{r}
+# Area calculation for present range
+
+# save and then modify full raster
+predictions_present <- predictions_rf_model_present
+predictions_present[predictions_present <= 0.1396935] <- NA
+
+# get sizes of all cells with suitability over threshold
+cell_size <- area(predictions_present, 
+                  na.rm = TRUE, 
+                  weights = FALSE)
+
+# delete any NAs from vector of all raster cells
+cell_size <- cell_size[!is.na(cell_size)]
+
+# compute area [km2] of all cells in prediction_over50
+suitable_area_present <- length(cell_size)*mean(cell_size)
+
+suitable_area_present
+```
+
+```{r}
+# Area calculation for future range
+
+# save and then modify full raster
+predictions_future <- predictions_rf_model_future
+predictions_future[predictions_future <= 0.1396935] <- NA
+
+# get sizes of all cells with suitability over threshold
+cell_size <- area(predictions_future, 
+                  na.rm = TRUE, 
+                  weights = FALSE)
+
+# delete any NAs from vector of all raster cells
+cell_size <- cell_size[!is.na(cell_size)]
+
+# compute area [km2] of all cells in prediction_over50
+suitable_area_future <- length(cell_size)*mean(cell_size)
+
+suitable_area_future
+```
+
+It seems that the amount of suitable habitat for the crabs will increase quite a bit.
