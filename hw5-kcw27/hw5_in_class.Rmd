@@ -1,0 +1,619 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## File metadata
+
+Template author: Morgan Carr-Markell  
+Template last modified on: Feb 28, 2023  
+Notebook modified by: Katie Wang  
+Notebook last modified on: Mar 1, 2023  
+
+
+## Source
+
+The code and many descriptions in this notebook come from a tutorial posted on the (National Ecological Observatory Network) NEON website and originally from the Data Carpentries. You can find the original tutorial here:
+https://www.neonscience.org/resources/learning-hub/tutorials/introduction-working-raster-data-r#toggle-26
+
+**Important note:** Remember to:
+
+1. download the data zip file
+2. unzip it
+3. place the unzipped folder in this hw5 directory
+
+Otherwise, you will have no data to work with!
+
+
+# Getting to understand the data
+
+Before you start the tutorial on loading, plotting, and processing raster data in R, go to this [NEON tutorial](https://www.neonscience.org/resources/learning-hub/tutorials/chm-dsm-dtm-gridded-lidar-data) and read just to the end of the section called "Gridded, or Raster, LiDAR Data Products"
+
+1. What do DTM, DSM, and CHM stand for?  
+DTM: Digital Terrain Model.  
+DSM: Digital Surface Model.  
+CHM = DSM - DTM; it's the Canopy Height Model.
+
+2. What are the two main formats of LiDAR data files and how are they different?  
+One is the .las file format for LIDAR point clouds. These are collections of points with (x, y, z) values and other attributes, and are not aligned with a particular grid. The other is the gridded or raster data format, which is a grid of cells all of the same size. Each cell represents a certain amount of area on the ground.
+
+
+----
+
+# Raster 00: Intro to Raster Data in R
+
+Original Authors: Leah A. Wasser, Megan A. Jones, Zack Brym, Kristina Riemer, Jason Williams, Jeff Hollister, Mike Smorul
+
+Original Last Updated: Apr 8, 2021
+
+In this tutorial, we will review the fundamental principles, packages and metadata/raster attributes that are needed to work with raster data in R. We discuss the three core metadata elements that we need to understand to work with rasters in R: CRS, extent and resolution. It also explores missing and bad data values as stored in a raster and how R handles these elements. Finally, it introduces the GeoTiff file format.
+
+
+## 00-A Loading libraries
+
+```{r}
+options("rgdal_show_exportToProj4_warnings"="none") # to suppress warning messages
+library(raster)
+library(rgdal)
+library(rasterVis)
+library(tidyverse)
+```
+
+
+## 00-B Loading the data
+
+```{r}
+# Load raster into R
+DSM_HARV <- raster("NEON-DS-Airborne-Remote-Sensing/HARV/DSM/HARV_dsmCrop.tif")
+
+# View raster structure
+DSM_HARV 
+```
+
+
+## 00-C Plotting with base R plot function
+
+```{r}
+# plot raster
+# note \n in the title forces a line break in the title
+plot(DSM_HARV, 
+     main="NEON Digital Surface Model\nHarvard Forest")
+```
+
+
+## 00-D Types of Data Stored in Raster Format
+
+Raster data can be continuous or categorical. Continuous rasters can have a range of quantitative values. Some examples of continuous rasters include:
+
+* Precipitation maps.
+* Maps of tree height derived from LiDAR data.
+* Elevation values for a region.
+
+The raster we loaded and plotted earlier was a digital surface model, or a map of the elevation for Harvard Forest derived from the NEON AOP LiDAR sensor. Elevation is represented as a continuous numeric variable in this map. The legend shows the continuous range of values in the data from around 300 to 420 meters.
+
+Some rasters contain categorical data where each pixel represents a discrete class such as a landcover type (e.g., "forest" or "grassland") rather than a continuous value such as elevation or temperature. Some examples of classified maps include:
+
+* Landcover/land-use maps.
+* Tree height maps classified as short, medium, tall trees.
+* Elevation maps classified as low, medium and high elevation.
+
+*Note:* Skipped section on creating categorical plot because it is covered in more detail below
+
+
+## 00-E What is a GeoTIFF??
+
+Raster data can come in many different formats. In this tutorial, we will use the geotiff format which has the extension .tif. A .tif file stores metadata or attributes about the file as embedded tif tags. For instance, your camera might store a tag that describes the make and model of the camera or the date the photo was taken when it saves a .tif. A GeoTIFF is a standard .tif image format with additional spatial (georeferencing) information embedded in the file as tags. These tags can include the following raster metadata:
+
+* A Coordinate Reference System (CRS)
+* Spatial Extent (extent)
+* Values that represent missing data (NoDataValue)
+* The resolution of the data
+
+In this tutorial we will discuss all of these metadata tags.
+
+More about the .tif format:
+
+* [GeoTIFF on Wikipedia](https://en.wikipedia.org/wiki/GeoTIFF)
+* [OSGEO TIFF documentation](https://trac.osgeo.org/geotiff/)
+
+*Note:* I am skipping the CRS part of the tutorial because we covered that last week, but if you want a refresher you can look at that section of the online tutorial [here](https://www.neonscience.org/resources/learning-hub/tutorials/introduction-working-raster-data-r#toggle-0)
+
+
+## 00-F Extent
+
+The spatial extent is the geographic area that the raster data covers.
+
+The spatial extent of an R spatial object represents the geographic "edge" or location that is the furthest north, south, east and west. In other words, extent represents the overall geographic coverage of the spatial object.
+
+
+## 00-G Resolution
+
+A raster has horizontal (x and y) resolution. This resolution represents the area on the ground that each pixel covers. The units for our data are in meters. Given our data resolution is 1 x 1, this means that each pixel represents a 1 x 1 meter area on the ground.
+
+The best way to view resolution units is to look at the coordinate reference system string crs(). Notice our data contains: +units=m.
+
+*Note:* You'll see a warning about the Proj.4 representation being deprecated. You can ignore that.
+
+```{r}
+crs(DSM_HARV)
+```
+
+*Note:* I am skipping the raster min and max values section
+
+
+## 00-H NoData Values in Rasters
+
+Raster data often has a NoDataValue associated with it. This is a value assigned to pixels where data are missing or no data were collected.
+
+By default the shape of a raster is always square or rectangular. So if we have a dataset that has a shape that isn't square or rectangular, some pixels at the edge of the raster will have NoDataValues. This often happens when the data were collected by an airplane which only flew over some part of a defined region.
+
+In the image below, the pixels that are black have NoDataValues. The camera did not collect data in these areas.
+
+```{r}
+# stack() is a raster function to create a rasterStack object
+RGB_stack <- stack("NEON-DS-Airborne-Remote-Sensing/HARV/RGB_Imagery/HARV_RGB_Ortho.tif")
+
+# Create an RGB image from the raster stack
+par(col.axis = "white", col.lab = "white", tck = 0)
+# Note: col.axis and col.lab set the colors for the axis annotation and x/y labels
+      # tck is the length of tick marks on the axes
+
+# The code below plots an RGB color image using layers in a rasterStack object
+# We have to tell the function which layers in the stack contain red green and blue
+plotRGB(RGB_stack, 
+        r = 1, 
+        g = 2, 
+        b = 3, 
+        axes = TRUE, 
+        main = "Raster With NoData Values\nRendered in Black")
+```
+
+*Note:* Skipped section on setting NoData values to NA
+
+
+## 00-I NoData Value Standard
+
+The assigned NoDataValue varies across disciplines; -9999 is a common value used in both the remote sensing field and the atmospheric fields. It is also the standard used by the National Ecological Observatory Network (NEON).
+
+If we are lucky, our GeoTIFF file has a tag that tells us what is the NoDataValue. If we are less lucky, we can find that information in the raster's metadata. If a NoDataValue was stored in the GeoTIFF tag, when R opens up the raster, it will assign each instance of the value to NA. Values of NA will be ignored by R as demonstrated above.
+
+
+## 00-J Bad Data Values in Rasters
+
+Bad data values are different from NoDataValues. Bad data values are values that fall outside of the applicable range of a dataset.
+
+Examples of Bad Data Values:
+
+* The normalized difference vegetation index (NDVI), which is a measure of greenness, has a valid range of -1 to 1. Any value outside of that range would be considered a "bad" or miscalculated value.
+* Reflectance data in an image will often range from 0-1 or 0-10,000 depending upon how the data are scaled. Thus a value greater than 1 or greater than 10,000 is likely caused by an error in either data collection or processing.
+
+
+### Find Bad Data Values
+
+Sometimes a raster's metadata will tell us the range of expected values for a raster. Values outside of this range are suspect and we need to consider than when we analyze the data. Sometimes, we need to use some common sense and scientific insight as we examine the data - just as we would for field data to identify questionable values.
+
+
+### Create A Histogram of Raster Values
+
+We can explore the distribution of values contained within our raster using the hist() function which produces a histogram. Histograms are often useful in identifying outliers and bad data values in our raster data.
+
+```{r}
+# view histogram of data
+hist(DSM_HARV,
+     main = "Distribution of Digital Surface Model Values\n Histogram Default: 100,000 pixels\n NEON Harvard Forest",
+     xlab = "DSM Elevation Value (m)",
+     ylab = "Frequency",
+     col = "wheat")
+```
+
+Notice that a warning is shown when R creates the histogram.
+
+This warning is caused by the default maximum pixels value of 100,000 associated with the hist function. This maximum value is to ensure processing efficiency as our data become larger!
+
+* More on histograms in [R from R-bloggers](https://www.r-bloggers.com/2012/12/basics-of-histograms/)
+
+We can define the max pixels to ensure that all pixel values are included in the histogram. USE THIS WITH CAUTION as forcing R to plot all pixel values in a histogram can be problematic when dealing with very large datasets.
+
+```{r}
+# View the total number of pixels (cells) in is our raster 
+totalCells <- ncell(DSM_HARV)
+```
+
+Now we can add that as a parameter, maxpixels:
+
+```{r}
+# create histogram that includes with all pixel values in the raster
+hist(DSM_HARV, 
+     maxpixels = totalCells,
+     main = "Distribution of DSM Values\n All Pixel Values Included\n NEON Harvard Forest Field Site",
+     xlab = "DSM Elevation Value (m)",
+     ylab = "Frequency",
+     col = "wheat4")
+```
+
+Note that the shape of both histograms looks similar to the previous one that was created using a representative 10,000 pixel subset of our raster data. The distribution of elevation values for our Digital Surface Model (DSM) looks reasonable. It is likely there are no bad data values in this particular raster.
+
+
+## 00-K Raster Bands
+
+The Digital Surface Model object (DSM_HARV) that we've been working with is a single band raster. This means that there is only one dataset stored in the raster: surface elevation in meters for one time period.
+
+A raster dataset can contain one or more bands. We can use the raster() function to import one single band from a single OR multi-band raster. We can view the number of bands in a raster using the nlayers() function.
+
+```{r}
+# view number of bands
+nlayers(DSM_HARV)
+```
+
+However, raster data can also be multi-band meaning that one raster file contains data for more than one variable or time period for each cell. By default the raster() function only imports the first band in a raster regardless of whether it has one or more bands.
+
+
+## 00-L View Raster File Attributes
+
+Remember that a GeoTIFF contains a set of embedded tags that contain metadata about the raster. So far, we've explored raster metadata after importing it in R. However, we can use the GDALinfo("path-to-raster-here") function to view raster metadata before we open a file in R.
+
+*Note:* In this notebook, you'll need to click through the three data frames to see all of the info about this rasterLayer.
+
+```{r}
+# view attributes before opening file
+GDALinfo("NEON-DS-Airborne-Remote-Sensing/HARV/DSM/HARV_dsmCrop.tif")
+```
+
+Notice a few things in the output:
+
+* A projection is described using a string in the proj4 format : +proj=utm +zone=18 +datum=WGS84 +units=m +no_defs
+* We can identify a NoDataValue: -9999
+* We can tell how many bands the file contains: 1
+* We can view the x and y resolution of the data: 1
+* We can see the min and max values of the data: Bmin and Bmax.
+
+It is ideal to use GDALinfo to explore your file before reading it into R.
+
+*Note:* rgdal is being replaced by functions in sf and terra/stars so this won't be true in the future.
+
+
+# CHALLENGE: EXPLORE RASTER METADATA
+
+1. Without using the raster function to read the file into R, determine the following about the NEON-DS-Airborne-Remote-Sensing/HARV/DSM/HARV_DSMhill.tif file:
+
+```{r}
+GDALinfo("NEON-DS-Airborne-Remote-Sensing/HARV/DSM/HARV_DSMhill.tif")
+```
+
+2. Does this file have the same CRS as DSM_HARV?  
+Yes; they both have proj=utm.
+
+3. What is the NoDataValue?  
+NoDataValue is -9999.
+
+4. What is resolution of the raster data?  
+The x and y resolution are both 1.
+
+5. How large would a 1x1 pixel area would be on the Earth's surface?  
+Because res.x and res.y are 1, and the units of the projection system are meters, each pixel is a 1m x 1m area on Earth.
+
+6. Is the file a multi- or single-band raster?  
+This file has 1 band.
+
+Notice: this file is a hillshade, which uses information about elevation to add shadows to make changes in elevation clearer to a map viewer.
+
+
+----
+
+# Raster 01: Plot Raster Data in R
+
+Original Authors: Leah A. Wasser, Megan A. Jones, Zack Brym, Kristina Riemer, Jason Williams, Jeff Hollister, Mike Smorul
+
+Original Last Updated: Apr 8, 2021
+
+This tutorial reviews how to plot a raster in R using the plot() function. It also covers how to layer a raster on top of a hillshade to produce an eloquent map.
+
+
+## 01-A Plot Raster Data in R
+
+In this tutorial, we will plot the Digital Surface Model (DSM) raster for the NEON Harvard Forest Field Site. We will use the hist() function as a tool to explore raster values. And render categorical plots, using the breaks argument to get bins that are meaningful representations of our data.
+
+First, let's plot our Digital Surface Model object (DSM_HARV) using the plot() function. We add a title using the argument main="title".
+
+```{r}
+# Plot raster object
+plot(DSM_HARV,
+     main="Digital Surface Model\nNEON Harvard Forest Field Site")
+```
+
+
+## 01-B Plotting Data Using Breaks
+
+We can view our data "symbolized" or colored according to ranges of values rather than using a continuous color ramp. This is comparable to a "classified" map. However, to assign breaks, it is useful to first explore the distribution of the data using a histogram. The breaks argument in the hist() function tells R to use fewer or more breaks or bins.
+
+If we name the histogram, we can also view counts for each bin and assigned break values.
+
+```{r}
+# Plot distribution of raster values 
+DSMhist <- hist(DSM_HARV,
+     breaks = 3,
+     main = "Histogram Digital Surface Model\n NEON Harvard Forest Field Site",
+     col = "wheat3",  # changes bin color
+     xlab = "Elevation (m)")  # label the x-axis
+```
+
+Warning message!? Remember, the default for the histogram is to include only a subset of 100,000 values. We could force it to show all the pixel values or we can use the histogram as is and figure that the sample of 100,000 values represents our data well.
+
+```{r}
+# Where are the breaks and how many pixels in each category?
+DSMhist$breaks
+
+DSMhist$counts
+```
+
+
+Looking at our histogram, R has binned out the data as follows:
+
+300-350m, 350-400m, 400-450m
+
+1. Which elevation bin are most pixels in?
+There are 67575 pixels in the largest bin, which is 350-400m.
+
+
+We could specify different breaks, if we wished to have a different distribution of pixels in each bin.
+
+We can use those bins to plot our raster data. We will use the terrain.colors() function to create a palette of 3 colors to use in our plot.
+
+The breaks argument allows us to add breaks. To specify where the breaks occur, we use the following syntax: breaks = c(value1, value2, value3). We can include as few or many breaks as we'd like.
+
+```{r}
+# plot using breaks.
+plot(DSM_HARV, 
+     breaks = c(300, 350, 400, 450), 
+     col = terrain.colors(3),
+     main = "Digital Surface Model (DSM)\n NEON Harvard Forest Field Site")
+```
+
+**Data Tip:** Note that when we assign break values a set of 4 values will result in 3 bins of data.
+
+
+## 01-C Format Plot
+
+If we need to create multiple plots using the same color palette, we can create an R object (myCol) for the set of colors that we want to use. We can then quickly change the palette across all plots by simply modifying the myCol object.
+
+We can label the x- and y-axes of our plot too using xlab and ylab.
+
+```{r}
+# Assign color to a object for repeat use/ ease of changing
+myCol = terrain.colors(3)
+
+# Add axis labels
+plot(DSM_HARV, 
+     breaks = c(300, 350, 400, 450), 
+     col = myCol,
+     main = "Digital Surface Model\nNEON Harvard Forest Field Site", 
+     xlab = "UTM Westing Coordinate (m)", 
+     ylab = "UTM Northing Coordinate (m)")
+```
+
+
+## 01-D Layering Rasters
+
+We can layer a raster on top of a hillshade raster for the same area, and use a transparency factor to created a 3-dimensional shaded effect. A hillshade is a raster that maps the shadows and texture that you would see from above when viewing terrain.
+
+```{r}
+# import DSM hillshade
+DSM_hill_HARV <- raster("NEON-DS-Airborne-Remote-Sensing/HARV/DSM/HARV_DSMhill.tif")
+
+# plot hillshade using a grayscale color ramp that looks like shadows.
+plot(DSM_hill_HARV,
+    col = grey(1:100/100),  # create a color ramp of grey colors
+    legend = FALSE,
+    main = "Hillshade - DSM\n NEON Harvard Forest Field Site",
+    axes = FALSE)
+```
+
+**Data Tip:** Turn off, or hide, the legend on a plot using `legend=FALSE`.
+
+We can layer another raster on top of our hillshade using by using add = TRUE. Let's overlay DSM_HARV on top of the hill_HARV.
+
+```{r}
+# plot hillshade using a grayscale color ramp that looks like shadows.
+plot(DSM_hill_HARV,
+    col = grey(1:100/100),  #create a color ramp of grey colors
+    legend = F,
+    main = "DSM with Hillshade \n NEON Harvard Forest Field Site",
+    axes = FALSE)
+
+# add the DSM on top of the hillshade
+plot(DSM_HARV,
+     col = rainbow(100),
+     alpha = 0.4, # partly transparent
+     add = T, # layers this plot on top of the previous plot
+     legend = F)
+```
+
+The alpha value determines how transparent the colors will be (0 being transparent, 1 being opaque). Note that here we used the color palette rainbow() instead of terrain.color().
+
+* More information in the [R color palettes documentation](https://stat.ethz.ch/R-manual/R-devel/library/grDevices/html/palettes.html).
+
+
+----
+
+# Raster 02: When Rasters Don't Line Up - Reproject Raster Data in R
+
+Original Authors: Leah A. Wasser, Megan A. Jones, Zack Brym, Kristina Riemer, Jason Williams, Jeff Hollister, Mike Smorul
+
+Original Last Updated: Apr 8, 2021
+
+Sometimes we encounter raster datasets that do not "line up" when plotted or analyzed. Rasters that don't line up are most often in different Coordinate Reference Systems (CRS).
+
+This tutorial explains how to deal with rasters in different, known CRSs. It will walk though reprojecting rasters in R using the projectRaster() function in the raster package.
+
+## 02-A Raster Projection in R
+
+In the Plot Raster Data in R tutorial, we learned how to layer a raster file on top of a hillshade for a nice looking basemap. In that tutorial, all of our data were in the same CRS. What happens when things don't line up?
+
+Let's create a map of the Harvard Forest Digital Terrain Model (DTM_HARV) draped or layered on top of the hillshade (DTM_hill_HARV).
+
+```{r}
+DTM_HARV <- raster("NEON-DS-Airborne-Remote-Sensing/HARV/DTM/HARV_dtmCrop.tif")
+DTM_hill_HARV <- raster("NEON-DS-Airborne-Remote-Sensing/HARV/DTM/HARV_DTMhill_WGS84.tif")
+
+# plot hillshade using a grayscale color ramp 
+#plot(DTM_hill_HARV,
+    #col = grey(1:100/100),
+    #legend = FALSE,
+    #main = "DTM Hillshade\n NEON Harvard Forest Field Site")
+
+# overlay the DTM on top of the hillshade
+#plot(DTM_HARV,
+     #col = terrain.colors(10),
+     #alpha = 0.4,
+     #add = TRUE,
+     #legend = FALSE)
+
+# I ran this chunk twice and it crashed my R session both times (might be a RAM error)
+# It's supposed to only plot the first one
+```
+
+Our results are curious - the Digital Terrain Model (DTM_HARV) did not plot on top of our hillshade. The hillshade plotted just fine on it's own. Let's try to plot the DTM on it's own to make sure there are data there.
+
+**Code Tip:** For boolean R elements, such as `add = TRUE`, you can use `T` and `F` in place of `TRUE` and `FALSE`
+
+```{r}
+# Plot DTM 
+plot(DTM_HARV,
+     col = terrain.colors(10),
+     alpha = 1,
+     legend = F,
+     main = "Digital Terrain Model\n NEON Harvard Forest Field Site")
+```
+
+Our DTM seems to contain data and plots just fine. Let's next check the Coordinate Reference System (CRS) and compare it to our hillshade.
+
+```{r}
+# view crs for DTM
+crs(DTM_HARV)
+```
+
+```{r}
+# view crs for hillshade
+crs(DTM_hill_HARV)
+```
+
+Aha! DTM_HARV is in the UTM projection. DTM_hill_HARV is in Geographic WGS84 - which is represented by latitude and longitude values. Because the two rasters are in different CRSs, they don't line up when plotted in R. We need to reproject DTM_hill_HARV into the UTM CRS. Alternatively, we could project DTM_HARV into WGS84.
+
+
+## 02-B Reproject Rasters
+
+We can use the projectRaster function to reproject a raster into a new CRS. Keep in mind that reprojection only works when you first have a defined CRS for the raster object that you want to reproject. It cannot be used if no CRS is defined. Lucky for us, the DTM_hill_HARV has a defined CRS.
+
+**Data Tip:** When we reproject a raster, we move it from one "grid" to another. Thus, we are modifying the data! Keep this in mind as we work with raster data.
+To use the projectRaster function, we need to define two things:
+
+* the object we want to reproject and
+* the CRS that we want to reproject it to.
+
+The syntax is projectRaster(RasterObject, crs = CRSToReprojectTo)
+
+We want the CRS of our hillshade to match the DTM_HARV raster. We can thus assign the CRS of our DTM_HARV to our hillshade within the projectRaster() function as follows: crs=crs(DTM_HARV)
+
+```{r}
+# reproject to UTM
+DTM_hill_UTMZ18N_HARV <- projectRaster(DTM_hill_HARV, 
+                                       crs = crs(DTM_HARV))
+
+# compare attributes of DTM_hill_UTMZ18N to DTM_hill
+crs(DTM_hill_UTMZ18N_HARV)
+```
+
+```{r}
+# compare attributes of DTM_hill_UTMZ18N to DTM_hill
+crs(DTM_hill_HARV)
+```
+
+```{r}
+# compare attributes of DTM_hill_UTMZ18N to DTM_hill
+extent(DTM_hill_UTMZ18N_HARV)
+
+extent(DTM_hill_HARV)
+```
+
+Notice in the output above that the crs() of DTM_hill_UTMZ18N_HARV is now UTM. Also, the extent values of DTM_hillUTMZ18N_HARV are different from DTM_hill_HARV.
+
+
+## Challenge: Extent Change with CRS Change 
+
+1. Why do you think the two extents (of DTM_hillUTMZ18N_HARV and DTM_hill_HARV) differ?
+While DTM_hill_UTMZ18N_HARV is in UTM (i.e. in terms of meters), DTM_hill_HARV is in terms of latitude and longitude. In the conversion from one projection to another, the units change, so the extents change too.
+
+
+## 02-C Deal with Raster Resolution
+
+Let's next have a look at the resolution of our reprojected hillshade.
+
+```{r}
+# compare resolution
+res(DTM_hill_UTMZ18N_HARV)
+```
+
+The output resolution of DTM_hill_UTMZ18N_HARV is 1 x 0.998. Yet, we know that the resolution for the data should be 1m x 1m. We can tell R to force our newly reprojected raster to be 1m x 1m resolution by adding a line of code (res=).
+
+```{r}
+# adjust the resolution 
+DTM_hill_UTMZ18N_HARV <- projectRaster(DTM_hill_HARV, 
+                                  crs = crs(DTM_HARV),
+                                  res = 1)
+
+# view resolution
+res(DTM_hill_UTMZ18N_HARV)
+```
+
+Let's plot our newly reprojected raster.
+
+```{r}
+# plot newly reprojected hillshade
+plot(DTM_hill_UTMZ18N_HARV,
+    col = grey(1:100/100),
+    legend = F,
+    main = "DTM with Hillshade\n NEON Harvard Forest Field Site")
+
+# overlay the DTM on top of the hillshade
+plot(DTM_HARV,
+     col = terrain.colors(100),
+     alpha = 0.4,
+     add = T,
+     legend = F)
+```
+
+We have now successfully draped the Digital Terrain Model on top of our hillshade to produce a nice looking, textured map!
+
+
+## Challenge: Reproject a Digital Surface Model Create a map of the San Joaquin Experimental Range field site
+
+Use the `NEON-DS-Airborne-Remote-Sensing/SJER/DSM/SJER_dsmCrop.tif` and `NEON-DS-Airborne-Remote-Sensing/SJER/DSM/SJER_DSMhill_WGS84.tif` files.
+
+We'll load in the two rasterLayers from the files listed above:
+
+```{r}
+DSM_SJER <- raster("NEON-DS-Airborne-Remote-Sensing/SJER/DSM/SJER_dsmCrop.tif")
+DSM_hill_UTMZ18N_SJER <- raster("NEON-DS-Airborne-Remote-Sensing/SJER/DSM/SJER_DSMhill_WGS84.tif")
+```
+
+1. Use the crs() function to look at their coordinate reference systems (focus on the proj string at the top, not the long warning message):
+
+```{r}
+crs(DSM_SJER) # proj=utm
+crs(DSM_hill_UTMZ18N_SJER) # proj=longlat
+```
+
+2. Reproject one of them so they have the same CRS:
+
+```{r}
+DSM_hill_SJER_UTM <- projectRaster(DSM_hill_UTMZ18N_SJER,
+                                   crs = crs(DSM_SJER))
+```
+
+3. Check your work using the crs() function:
+
+```{r}
+crs(DSM_hill_SJER_UTM)
+```
+
+Great work! You have learned a lot about working with raster data and plotting using base R.

@@ -1,0 +1,611 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# File metadata
+
+Template author: Morgan Carr-Markell  
+Template last modified on: Jan 24th, 2023  
+Notebook modified by: Katie Wang
+Notebook last modified on: Jan 25th, 2023
+
+
+# Data source:
+
+Catenazzi, A., Lehr, E., Rodriguez, L.O., Vredenburg, V.T. (2011) _Batrachochytrium dendrobatidis_ and the collapse of anuran species richness and abundance in the upper Manu National Park, Southeastern Peru. _Conservation Biology, 25_(2), 382-391.
+
+
+# Section I: In-class work (10 points)
+
+You may work with other students in class on the details of this first section of the assignment (but do make sure to complete a copy of it and turn it in so I can give each of you credit). Below, when I want you to fill in text or code, I will use four asterisks like this: ****
+
+
+
+## Part 1: Basic introduction to R notebooks
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk. You can also go to Tools>Keyboard Shortcuts Help to see a list of shortcuts, including the shortcut to run a chunk of code.
+
+```{r}
+plot(cars)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar (green rectangle with a C in it) or by using a keyboard shortcut.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed. So if you want a full report, you'll need run all code chunks before clicking the Preview button. You can do that by using an option in the Run drop down menu above.
+
+
+
+## Part 2: R Markdown
+
+Let's practice a little bit of formatting using the R Markdown language.
+
+1. Go to this [link](https://www.rstudio.com/wp-content/uploads/2015/02/rmarkdown-cheatsheet.pdf)
+
+2. Read through the short guide and then try out __three__ of the following options:
+
+  * Different header levels
+  * Italics
+  * Bold text
+  * An ordered list
+  * An unordered list
+  * An inline break
+  * Inserting a link
+  * Inserting in-line, evaluated code
+
+Add your practice R Markdown text below:
+
+# Headers
+## get smaller
+### the more
+#### pound signs you use
+
+*italics text flanked by single asterisks*  
+**bold text flanked by double asterisks**  
+`r 1+1 # notice the back ticks around the inline code` consecutive spaces result in a paragraph break. If I hadn't added them after the bold and italic text, these three lines would all be one line.
+
+
+## Part 3: Variable assignment
+
+
+### 3.1 Types of objects in R
+
+Everything in R is an object of some type. For the purposes of this class, we will be working with eight main types of objects:
+
+  * character (similar to strings in Python)
+  * integer
+  * double/numeric (similar to float in Python)
+  * logical (True or False, evaluating to 1 or 0)
+  * factor (useful for categorical data)
+  * date (this is very useful for analyzing data collected over time dates and plotting temporal trends)
+  * atomic vectors, which are composed of multiple values that are all the same type (we'll talk more about these below)
+  * data frames, which are a special kind of named list of vectors that is very useful for storing data (again, we'll talk more about this below)
+
+
+### 3.2 Variable names
+
+We store these objects by giving them a name using this syntax:
+
+my_variable_name <- my_variable_value
+
+Notice that we use '<-' instead of '=' as an assignment operator in R. This is different than in Python, and is due to the history of R inheriting the idiosyncrasies of the language S. More recent versions of R will let you use either assignment operator, but the R style guide recommends using '<-' so I'll stick with that for this class.
+
+So what are valid variable names in R?
+
+  * It can have combinations of letters, numbers, underscores, and periods
+  * It must start with a letter (or a period, but I don't recommend that)
+  * It cannot include any spaces or other special characters
+
+Recommendations for variable names:
+
+* The fact that R variable names can have periods in them is quite different than Python, which uses periods for accessing methods or properties of an instance of a class. I generally recommend not using periods in your variable names for that reason because it can cause you to make errors if you switch back and forth from one language to another. However, you may see code online that uses periods in variable names like this: i.think.periods.are.confusing
+* The R style guide recommends snake case, which looks like this: snake_case_is_great
+* However, for this class if you would rather use camel case, that's fine too, just try to be consistent. Camel case looks like this: camelCaseIsFineToo
+
+
+### 3.3 Assigning values to variables
+
+Let's look at some examples:
+
+```{r}
+# character (note: the number at the end of the variable name is fine)
+advice1 <- "Bee kind"
+
+# integer (note the L, which tells R this is an integer rather than a double)
+answer <- 42L
+
+# double/numeric
+rough_answer <- 42
+
+# logical (in R, you can use 'TRUE' or 'T' and 'FALSE' or 'F')
+you_are_awesome <- TRUE
+
+```
+
+Look in the environment pane (generally in the upper right). Do you see those variable names? What are the five columns of information about each variable?
+(If you switch the Environment from List to Grid view, it'll show five columns. Both views are useful.)
+
+  1. Name
+  2. Type
+  3. Length
+  4. Size
+  5. Value
+
+Now just to practice, try assigning values to two new variables or different types (use any valid variable names you like):
+
+```{r}
+# your new variables
+I_have_never_used_integers_in_R_before <- 1L
+what_happens_if_we_add_a_double_to_an_int <- I_have_never_used_integers_in_R_before + 1
+# seems like if you don't specify a type for a number, it defaults to double
+
+typeof(I_have_never_used_integers_in_R_before) # sure enough, it's an integer
+typeof(what_happens_if_we_add_a_double_to_an_int) # it becomes a double
+
+I_have_never_used_integers_in_R_before / 2
+typeof(I_have_never_used_integers_in_R_before / 2) # the int turned into a double after (non-integer) division
+
+I_have_never_used_integers_in_R_before %/% 2
+typeof(I_have_never_used_integers_in_R_before %/% 2) # even with integer division, we still get a double???
+```
+
+
+## Part 4: Math in R
+
+Let's go over some basic math syntax in R. Below are several examples of different operations you may need for your functions later in the homework. Try running the code chunk to see what they all evaluate to. The results will display below the code chunk.
+
+```{r}
+# addition
+21 + 21
+
+# multiplication
+6 * 7
+
+# subtraction
+45 - 3
+
+# division
+84 / 2
+
+# integer division
+84.6 %/% 2
+
+# modulo (remainder)
+92 %% 50
+
+# exponentiation (and subtraction)
+7^2 - 7
+
+# e and the natural logarithm
+exp(1)^log(42)
+
+# absolute value
+abs(-42)
+
+```
+
+Just for some quick practice, try writing two expressions in the code chunk below that use different operators and all evaluate to your favorite number:
+
+```{r}
+# your mathematical expressions
+103 %/% 12 + 2 # integer division is two percentage signs flanking the division sign
+
+73 %% 7 + 7 # modulo is two percentage signs
+```
+
+### 4.1 Calling functions in R
+
+Just a few notes about using functions in R and RStudio:
+
+* Calling a function requires the function name followed immediately by any parameters to the function listed inside parentheses and separated by commas, like this: my_function(parameter1, parameter2)
+* Many functions have named parameters, and some parameters may have a default value set in the definition of the function
+* If a function has named parameters, you can either put in the values to those parameters using their names or using the order of the parameters that was set up in the function definition
+  + so my_function(parameter1 = 4, parameter2 = 5) is equivalent to my_function(4, 5)
+  + if my_function had a default value of 5 for parameter2, we could also just use my_function(4) to get the same result because the function would fill in the 5 for us
+
+Here are a few useful, built-in math functions:
+
+```{r}
+# sum
+sum(20, 20, 2) # notice that the arguments aren't a single vector
+
+# mean
+mean(c(40, 44))
+
+# median
+median(c(40, 42, 45))
+
+# standard deviation
+sd(c(0, 83.45512, 50))
+```
+
+## Part 5: Useful character functions
+
+In base R (the functions available without installing or loading any extra libraries), there are several useful functions for manipulating character objects (strings). Unlike in Python, we can't index into characters using square brackets and we can't use the '+' operator to add characters, but we can use functions to accomplish those things and more. 
+
+
+### 5.1 Character functions
+
+See some examples below.
+
+```{r}
+# Let's make a scientific name by combining two parts with the paste() function
+genus_example <- "Bombus"
+species_example <- "affinis"
+scientific_name_example <- paste(genus_example, species_example, sep = " ")
+scientific_name_example
+```
+
+```{r}
+# What if we want to extract a particular part of a character string? We can use the substr() function
+# Note: unlike Python, indices in R start at 1 rather than 0
+first_characters <- substr(x = advice1, start = 1, stop = 3)
+first_characters
+last_characters <- substr(advice1, 5, 8)
+last_characters
+```
+
+```{r}
+# We might instead want to determine which values in a vector of character strings contain some substring
+advice_vector <- c("Be kind", "be good", "be yourself", "be positive")
+grep(pattern = "be", x = advice_vector)
+```
+
+You might be surprised that it returns 2, 3, 4 rather than 1, 2, 3, and 4  
+Try running ?grep in the Console pane  
+That will open up the help page for the function in the bottom right. If you scroll down, you'll see that there is a list of parameters, including ignore.case
+
+```{r}
+# Let's try setting ignore.case to TRUE
+grep(pattern = "be", x = advice_vector, ignore.case = TRUE)
+```
+
+```{r}
+# Finally, let's replace a substring with a different substring using gsub()
+# Just for fun, we'll make the advice list into bee puns
+gsub(pattern = "be", replacement = "bee", x = advice_vector, ignore.case = TRUE)
+```
+
+OK, now let's practice using these functions with an example that is relevant to the species occurrence data you'll be working with later in the semester.
+
+Let's replace obsolete scientific names in a vector. The scientific name of red-flowering gum changed from _Eucalyptus ficifolia_ to _Corymbia ficifolia_ after taxonomists found new evidence about how it was related to other plants. In the names below we see some examples of the new name and some examples of the old name, which is problematic because we may want to use this vector to extract all the data from that species.
+
+```{r}
+# 
+scientific_names <- c("Corymbia ficifolia", "Eucalyptus ficifolia", "Corymbia ficifolia", "Eucalyptus ficifolia")
+
+# Use the gsub() function to correct the old names in the vector above
+scientific_names_corrected <- gsub(pattern = "Eucalyptus", replacement = "Corymbia", x = scientific_names)
+
+scientific_names_corrected
+```
+
+
+
+## Part 6: Logical expressions
+
+Logical expressions are statements that can be evaluated as true or false. They are very helpful in many contexts in R programming, but we will use them most often when extracting subsets of a larger data set. So what kinds of logical expressions can we create in R?
+
+
+### 6.1 Simple logical expressions
+
+First, let's look at some simple expressions:
+
+```{r}
+42 == 42 # 42 equals 42 (note the 2 equals signs, this is important!)
+
+42 != 41 # 42 is not equal to 41
+
+42 < 43 # 42 is less than 43
+
+42 > 41 # 42 is greater than 41
+
+42 <= 42 # 42 is less than or equal to 42
+
+"hello" != "world" # the character string "hello" is not equivalent to the character string "world"
+
+"mollusk" %in% c("arthropod", "mollusk", "cnidarian", "nematode") # "mollusk" is a value within this vector
+```
+
+
+### 6.2 More complex logical expressions
+
+Now that we are familiar with those sorts of expressions, we can combine them to create more complicated expressions using three logical operators: and, or, and not. In R, we use '&' to mean 'and', '|' (shift and backslash) to mean 'or', and '!' to mean 'not'
+
+```{r}
+42 > 41 & 42 < 43 # 42 is greater than 41 AND 42 is less than 43
+
+!42 < 41 # 42 is NOT less than 42
+
+42 < 41 | 42 > 41 # either 42 is less than 41 OR 42 is greater than 41 (which is a bit meaningless really)
+```
+
+Those are not very interesting examples. Let's try something more relevant to the data sets we will be working with. We'll consider observations of frogs/toads in the Peruvian Andes.
+
+```{r}
+# observation 1
+obs1_year <- "1999"
+obs1_genus <- "Atelopus" # a type of cellophane bee
+obs1_abundance <- 10
+
+# observation 2
+obs2_year <- "2008_2009" # data from these two years were combined due to fewer surveys
+obs2_genus <- "Atelopus"
+obs2_abundance <- 0
+
+# Try checking whether each observation (1 and 2) did *not* find an abundance of 0 (no frogs/toads seen)
+obs1_abundance != 0
+obs2_abundance != 0
+```
+
+
+
+## Part 7: Atomic vectors
+
+Now that we know about numbers, character strings, and logical expressions, let's look at another important data structure in R: the atomic vector. For most of this course, I'll generally just refer to them as vectors, which is what most people do. 
+
+Vectors are a little different than lists in that they can only contain one type of data. This rule may seem limiting, but it's actually very helpful because it allows us to use what are called vectorized functions to perform operations on all of the values in a vector at the same time. Often, vectorized functions are much faster than looping through the values in a vector (partly because they often call other functions written in C). We won't worry too much about speed in this course, but it is worth keeping in mind if you frequently work with massive data sets.
+
+
+### 7.1 Creating vectors
+
+So let's look at some ways to create vectors, and then we'll put them together into a data frame:
+
+```{r}
+# The rep() function creates a vector by repeating a value or set of values some number of times
+family <- rep("bufonidae", times = 10)
+
+# The simplest way to create a vector is using the c() function, which you've already seen used above
+# The values don't all need to be on their own line, but sometimes it's nice to format them that way
+genus <- c("Atelopus",
+          "Atelopus",
+          "Rhinella",
+          "Rhinella",
+          "Rhinella",
+          "Rhinella",
+          "Rhinella",
+          "Rhinella",
+          "Rhinella",
+          "Rhinella"
+          )
+
+species <- c("erythropus",
+            "erythropus",
+            "inca",
+            "inca",
+            "leptoscelis",
+            "leptoscelis",
+            "manu",
+            "manu",
+            "margaritifer",
+            "margaritifer"
+            )
+
+# Here we're repeating a set of years 5 times to create a 10-long numeric vector
+year <- rep(
+          x = c("1999", "2008_2009"), 
+          times = 5
+          )
+
+# Here we're using the c() function to create a 10-long numeric vector
+abundance <- c(5,
+              0,
+              0,
+              14,
+              32,
+              3,
+              0,
+              16,
+              15,
+              0
+              )
+```
+
+### 7.2 Working with vectors
+
+You can extract a value at particular index or multiple indices using square brackets like this:
+
+```{r}
+# Indexing
+abundance[3] # seems like you can use the square brackets to extract values from vectors but not strings (char)
+
+family[1:3] # remember that in R, the first index is 1, not 0
+```
+
+You can also create a logical vector of TRUEs and FALSEs using logical expressions with vectors like this:
+
+```{r}
+genus == "Atelopus"
+```
+This output vector reflects the fact that first two values in the genus vector were "Atelopus" (harlequin frogs) and the next eight were "Rhinella" (South American toads).
+
+You can also add numeric vectors (subtract, multiply, take them to the power of the other, etc.). This occurs in element-wise fashion to produce a new vector or the same length:
+
+```{r}
+vector1 <- c(1, 2, 3, 4, 5)
+vector2 <- c(1, 2, 3, 4, 5)
+
+vector1 + vector2
+```
+
+Try creating 5-long numeric vector and then extract the 4th value by indexing:
+
+```{r}
+# create vector
+my_vector = c(1, 2, 3, 5, 7)
+
+# extract 4th value
+my_vector[4] # once again: R starts counting from 1, not 0
+```
+
+## Part 8: Data frames
+
+### 8.1 Creating a data frame from vectors
+
+Normally, we will be reading in large comma-separated value (csv) or tab-delimited (.tab) files into data frames. However, to understand the structure of a data frame, it's worth creating one out of individual vectors. A data frame is really just a special kind of list where:
+
+  * each element in the list is a vector
+  * all vectors in the list have the same length (number of values)
+  * each vector has it's own name in addition to having an index (order) inside the list
+  * each row (first elements of every vector, second elements of every vector, etc.) also has a name
+
+This creates a structure much like a spreadsheet. Let's put those 10-long vectors we created above together to make a data frame:
+
+```{r}
+bufonidae <- data.frame(
+                      family,
+                      genus,
+                      species,
+                      year,
+                      abundance
+                      )
+```
+
+Now, look in the environment tab in the upper right. Do you see bufonidae listed (you may have scroll)? Click on the light blue table icon at the far right of the bufonidae row in the environment tab. A tab should allow you to see a spreadsheet view of the new data table. Look at the column names. By default, R will use the names of the vectors you give it as column names. Now look at the row names. By default, these are just numbers, but we could set them to whatever we want them to be.
+
+We can also get some information about the structure of the data frame using the str() function:
+
+```{r}
+str(bufonidae)
+```
+From this summary we see that there are 10 observations (rows), each with 5 variables (columns), and four of those variables are stored as character (chr) vectors while the last variable is stored as a numeric vector (num).
+
+
+### 8.2 Different ways to extract data from a data frame
+
+Data frames provide a very convenient way to store data, but how do we access it? It turns out that there are many different ways to access data in data frames. In two weeks, we will learn about some very useful functions in the tidyverse packages in R for accessing data, but for now let's cover some base R options. 
+
+Most of these will use square brackets with a comma separating the rows we want and then the columns we want like this: my_data_frame[rows, columns]
+
+However, you can also extract a whole column using this syntax: my_data_frame$column_name
+
+```{r}
+# Ways of finding the abundance of Atelopus erythropus individuals observed in surveys from 2008-2009
+bufonidae[2, 5]
+
+bufonidae[2, "abundance"]
+
+# This approach uses a logical vector of TRUEs and FALSEs to select the correct row
+bufonidae[bufonidae$genus == "Atelopus" & bufonidae$year == "2008_2009", "abundance"]
+
+bufonidae$abundance[2]
+
+bufonidae$abundance[bufonidae$genus == "Atelopus" & bufonidae$year == "2008_2009"]
+
+# Finding the year when the maximum number of Rhinella inca individuals was observed
+max_obs <- max(bufonidae[bufonidae$species == "inca", "abundance"])
+bufonidae[bufonidae$species == "inca" & bufonidae$abundance == max_obs, "year"]
+```
+
+Practice this yourself:
+
+```{r}
+# Extract a vector of the abundances of Rhinella species observed in 2008-2009
+bufonidae[bufonidae$genus == "Rhinella" & bufonidae$year == "2008_2009", "abundance"]
+# first index includes any rows for which both of the logical conditions are true
+# second index: we wanted the abundance column
+
+# Now find the mean (using the mean function) of abundances across species and years
+mean(bufonidae$abundance)
+```
+
+
+
+## Part 9: Control structures
+
+Before we get to writing our own functions, we have to talk a bit about control structures in R. Control structures are ways to tell your computer which commands to run, depending on the input. Conditional statements and loops are both types of control structures. I would recommend trying as much as possible to avoid loops in R because they tend to be slow, but it's worth knowing how to write them.
+
+If you're familiar with Python, you may be used to having white space indicate what part of a control structure each command belongs to (is inside the if block? is it inside the for loop?). In R, we don't accomplish this with white space. We accomplish it with curly braces (shift and square bracket keys). Each block has an opening curly brace at the beginning and a closing curly brace at the end. In addition, we put logical expressions and instructions about how to iterate a for loop inside parentheses. This will make more sense when you see the examples below.
+
+
+### 9.1 If, else if, and else
+
+Let's start with if, else if, else statements. These allow you to tell the computer to do different things depending on which of a number of different possible inputs it receives. Here's an example in R:
+
+```{r}
+population_size <- 400
+
+# These thresholds are totally made up, but let's say we were using population size to decide a species' Red List status
+if (population_size == 0){
+  IUCN_status <- "EW"
+} else if (population_size < 100){
+  IUCN_status <- "CR"
+} else if (population_size < 250){
+  IUCN_status <- "EN"
+} else if (population_size < 500){
+  IUCN_status <- "VU"
+} else if (population_size < 1000){
+  IUCN_status <- "NT"
+} else {
+  IUCN_status <- "LC"
+}
+IUCN_status
+```
+
+Remember that the order of if, else if, else checkpoints is very important because the computer will run each check until it reaches a logical expression that evaluates to true, then it will execute the commands in that block, and it will exit the control structure. So here it:
+
+  * checked whether 800 was equal to 0 (FALSE), 
+  * then whether 800 was less than 100 (FALSE), 
+  * then whether 800 was less than 250 (FALSE), 
+  * then whether 800 was less than 500 (TRUE) 
+  * at which point it set the IUCN_status to "VU" (vulnerable) 
+  * and exited the control structure.
+
+Try writing a control structure to check whether a year falls into one of three decades: the 1990s, the 2000s, or 2010s:
+
+```{r}
+test_year <- 1995
+
+# Write an if, else if, else structure below
+if (test_year >= 1990 & test_year < 2000) {
+  decade = "1990s"
+} else if (test_year >= 2000 & test_year < 2010) {
+  decade = "2000s"
+} else if (test_year >= 2010 & test_year < 2020) {
+  decade = "2010s"
+} else if (test_year < 1990) {
+  decade = "before 1990"
+} else {
+  decade = "after 2020"
+}
+
+decade
+```
+
+
+### 9.2 Loops
+
+In case you ever need it, here are examples of how to write for and while loops in R:
+
+```{r}
+pokemon <- c("Bulbasaur", "Ivysaur", "Venusaur", "Charmander", "Charmeleon",
+            "Charizard", "Squirtle", "Wartortle", "Blastoise", "Caterpie")
+
+# for loops that iterate through indices
+for (index in 1:length(pokemon)){
+  print(pokemon[index])
+}
+```
+
+```{r}
+# for loops that loop through items in an iterable object (such as vector)
+for (name in pokemon){
+  print(name)
+}
+```
+
+```{r}
+# while loop
+index <- 1 # initialize index
+
+while (index <= length(pokemon)){
+  print(pokemon[index])
+  index <- index + 1
+}
+```
+
+Nice job! You finished the in-class activity. Now you can take a break or move on to Section II.

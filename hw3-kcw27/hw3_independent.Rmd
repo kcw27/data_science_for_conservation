@@ -1,0 +1,299 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## File metadata
+
+Template author: Morgan Carr-Markell  
+Template last modified on: Fed 7th, 2023  
+Notebook modified by: Katie Wang  
+Notebook last modified on: Feb 14th, 2023   
+
+## Data Source
+
+McGuire, K. D., Schmidt, K. T., Ta, P., Long, J. J., Yurko, M., & Kimball, S. (2022). Is it best to add native shrubs to a coastal sage scrub restoration project as seeds or as seedlings?. Plos one, 17(2), e0262410.
+
+Coastal sage scrub habitats only occur in Southern California and Mexico. They include low-growing, drought-resistant, deciduous shrubs adapted to a semi-arid Mediterranean climate, and many of them, like sages, are aromatic (when you break the leaves or stems they release volatile compounds with a strong smell). Restoration efforts can be costly, and they often involve adding native plants that must compete with non-native plants.
+
+This study aimed to determine whether restoring sage scrub habitats by planting seeds (cheaper) or growing plants in a greenhouse and then transplanting them (more expensive) would result in greater native plant:
+
+* % coverage
+* density
+* species richness
+* growth
+
+They also wondered whether some native plant species would do better when seeded while others would do better when transplanted.
+
+
+## Libraries
+
+```{r}
+library(tidyverse)
+library(dplyr)
+```
+
+
+## Reading in the data
+
+We'll just read in three of the data files from this study to make things a bit simpler.
+
+```{r}
+shrub_cover <- read.csv("data/McGuire_etal_2022_cover_shrubs.csv")
+shrub_density <- read.csv("data/McGuire_etal_2022_density_shrubs.csv")
+lifespan <- read.csv("data/McGuire_etal_2022_lifespan.csv")
+```
+
+
+## Part 1: Examining the data (3 Points)
+
+Use view and glimpse to look at the three data frames. Feel free to add as many R chunks as you like.
+
+```{r}
+glimpse(shrub_cover)
+view(shrub_cover)
+```
+
+```{r}
+glimpse(shrub_density)
+view(shrub_density)
+```
+
+```{r}
+glimpse(lifespan)
+view(lifespan)
+```
+
+
+**Note:** Columns with names like X and X.1 are generally empty columns that were included in the csv files. You can ignore them.
+
+1. What variables do they have in common?  
+The variables that all three data frames have in common are: Block, Treatment, and Species_Code.
+
+
+2. How did they code treatment differently?  
+While shrub_cover and lifespan have "P" and "S" for treatment, shrub_density has "Planted" and "Seeded" instead. 
+
+
+3. Use the mutate() function and ifelse() function to standardize the treatment columns. Here's an example using ifelse() so you can see how it works:
+
+```{r}
+my_character <- "A"
+ifelse(my_character == "A", "Animal", "Non-animal")
+```
+
+You can standardize the treatment columns here:
+
+```{r}
+shrub_density <- shrub_density %>%
+  filter(Treatment != "") %>% # so as not to falsely assign empty rows as "S"
+  mutate(Treatment = ifelse(Treatment == "Planted", "P", "S"))
+```
+As recommended in the Sakai announcement, I've removed rows with no data before standardizing the treatment codes.
+
+## Part 2: Summarizing by block and then by treatment (6 Points)
+
+This experiment involved two treatments, but within each treatment were multiple blocks (different areas where the researchers used seeding or planting to establish shrubs). To determine the effect of treatment, we'll want to first get summaries for each block and then get means and standard errors across blocks for each treatment. If there were uneven numbers of blocks in different years, we might also want to take year into account, but fortunately that's not true here. Here is an example summarizing percent cover between the two treatments:
+
+```{r}
+treatment_cover <- shrub_cover %>%
+  group_by(Block, Treatment) %>%
+  summarize(Total_Cover = sum(Percent_Cover)) %>%
+  group_by(Treatment) %>%
+  summarize(
+    Cover = mean(Total_Cover), 
+    Cover_SE = sd(Total_Cover) / sqrt(n())
+    )
+
+treatment_cover
+```
+
+Here we needed to get the sum of cover for each block because each row in the  shrub_cover data frame represented only the cover from one species of shrub in one block.
+
+1. Summarize density from the shrub_density data frame in the same way (you'll need to change Percent_Cover, Total_cover, Cover, and Cover_SE to variables names that refer to density):
+
+```{r}
+treatment_density <- shrub_density %>%
+  group_by(Block, Treatment, Month, Year) %>% # accounts for measurements being taken 4 times for each plot
+  summarize(Total_Density = sum(Density)) %>% # sums only for the same round of measurement (i.e. taken in same month + year) 
+  group_by(Treatment) %>%
+  summarize(
+    Mean_Density = mean(Total_Density),
+    Density_SE = sd(Total_Density) / sqrt(n())
+  )
+
+treatment_density
+```
+You'll notice that there is a third row with NA values. The drop_na() function is useful here for getting rid of rows with NAs. 
+
+2. Use the command 'drop_na(Density) %>%' to fix this problem:
+
+```{r}
+# Because I used filter(Treatment != "") in part 1 question 3, there were no NAs to begin with
+# I'll do this problem with the unaltered shrub density datframe just to show that it works
+
+shrub_density_raw <- read.csv("data/McGuire_etal_2022_density_shrubs.csv")
+
+treatment_density_2 <- shrub_density_raw %>%
+  drop_na(Density) %>% # to restore the NA row, comment out this line
+  group_by(Block, Treatment, Month, Year) %>% # accounts for measurements being taken 4 times for each plot
+  summarize(Total_Density = sum(Density)) %>% # sums only for the same round of measurement (i.e. taken in same month + year) 
+  group_by(Treatment) %>%
+  summarize(
+    Mean_Density = mean(Total_Density),
+    Density_SE = sd(Total_Density) / sqrt(n())
+  )
+
+treatment_density_2
+```
+
+
+## Part 3: Plotting summaries by treatment (10 Points)
+
+Your next task is to look at Figure 2 from the McGuire et al. (2022) paper, which I've provided for you as a McGuire_etal_2022_Figure_2.png in the figures folder in this repository.
+
+Answer the following questions:
+
+1. What type of plots are these?  
+These are bar graphs with error bars on them.
+
+2. What type of variable (quantitative: discrete/continuous or categorical: ordinal/nominal) is shown on the x axis?  
+The x axis has the levels "planted" and "seeded", so it's a categorical variable. It's nominal because there's no clear order to the levels.
+
+3. What types of variables are shown on the y axis?  
+The variables on the y axis are all quantitative. They're continuous because they can take on any value between two given values.
+
+4. What other aesthetics (color, fill, shape, transparency, etc.) did they use to make their point clearer?  
+fill = Treatment is used to distinguish the bars from each other. The theme is set to one without grid lines so that the figure has a cleaner look. There are labels for the x and y axes that explain the variables and their units.
+
+5. Now recreate McGuire et al.'s Figure 2A. You can pipe the data frame we made above, treatment_cover, to a call to ggplot. Small differences in formatting are fine, but use geom_col() to make a column chart (hw2_in_class.Rmd, Part III, Section 1), remember to add error bars (hw2_in_class.Rmd, Part III, Section 3), and try to match the labels.
+
+```{r}
+treatment_cover %>%
+  ggplot(aes(x = Treatment, y = Cover, fill = Treatment)) +
+  geom_col(show.legend = FALSE) + # not geom_bar(); height should represent values, not proportions
+  geom_errorbar(
+    aes(ymin = Cover - Cover_SE, ymax = Cover + Cover_SE),
+    width = 0.2) + # so the error bars won't stretch across the whole column
+  scale_y_continuous(name = "Mean Total Native Percent Cover (%)",
+                     limits = c(0, 150)) + # to better match fig. 2A
+  scale_x_discrete(labels = c("PLANTED", "SEEDED")) +
+  scale_fill_manual(breaks = c("P", "S"), # breaks match the levels of the fill variable (Treatment)
+                       values=c("#79C04E", "#E2D649")) +
+  theme_classic()
+```
+
+6. Recreate McGuire et al.'s Figure 2B. You can pipe the data frame you made above, treatment_density, to a call to ggplot. Again, small differences in formatting are fine, but use geom_col() to make a column chart (hw2_in_class.Rmd, Part III, Section 1), remember to add error bars (hw2_in_class.Rmd, Part III, Section 3), and try to match the labels (don't worry about superscripts).
+
+```{r}
+treatment_density %>%
+  ggplot(aes(x = Treatment, y = Mean_Density, fill = Treatment)) +
+  geom_col(show.legend = FALSE) + # not geom_bar(); height should represent values, not proportions
+  geom_errorbar(
+    aes(ymin = Mean_Density - Density_SE, ymax = Mean_Density + Density_SE),
+    width = 0.2) + # so the error bars won't stretch across the whole column
+  scale_x_discrete(labels = c("PLANTED", "SEEDED")) +
+  scale_y_continuous(name = "Mean Total Native Density (plants/0.25m^2)",
+                     limits = c(0, 50)) + # to better match fig. 2B
+  scale_fill_manual(breaks = c("P", "S"), # breaks match the levels of the fill variable (Treatment)
+                       values=c("#79C04E", "#E2D649")) +
+  theme_classic()
+```
+
+
+## Part 4: Summarizing by block and then by species (4 Points)
+
+Next we want to summarize the data by block and then by species (because the block a shrub species is planted in may affect its growth). Here I provide some code illustrating how to do this to summarize percent cover:
+
+```{r}
+species_cover <- shrub_cover %>%
+  group_by(Block, Treatment, Species_Code) %>%
+  summarize(Block_Percent_Cover = mean(Percent_Cover)) %>%
+  group_by(Species_Code, Treatment) %>%
+  summarize(
+    Percent_Cover = mean(Block_Percent_Cover), 
+    SE_Percent_Cover = sd(Block_Percent_Cover) / sqrt(n())
+  )
+
+species_cover
+```
+
+1. Now summarize mean estimated lifespan (column name is EstimatedDays2Death) across species in the same way, using the lifespan data frame:
+
+```{r}
+species_lifespan <- lifespan %>%
+  group_by(Block, Treatment, Species_Code) %>%
+  summarize(Block_Lifespan = mean(EstimatedDays2Death)) %>% # average the lifespan for that species + treatment within the block first
+  group_by(Species_Code, Treatment) %>%
+  summarize(
+    Lifespan = mean(Block_Lifespan),
+    SE_Lifespan = sd(Block_Lifespan) / sqrt(n())
+  )
+
+species_lifespan
+```
+
+
+## Part 5: Plotting summaries by species (8 Points)
+
+Next look look at Figure 3 from the McGuire et al. (2022) paper, which I've provided for you as a McGuire_etal_2022_Figure_3.png in the figures folder in this repository.
+
+Answer the following questions:
+
+1. What type of plots are these?  
+These are scatter plots, but one axis is categorical rather than quantitative. There are also error bars on the data points, which I don't typically see in scatter plots.
+
+2. What type of variable (quantitative: discrete/continuous or categorical: ordinal/nominal) is shown on the x axis?  
+The x axis shows a nominal categorical variable. Once again, it's nominal because there's no intrinsic order to the levels of "planted" and "seeded".
+
+3. What types of variables are shown on the y axis?  
+The y axis shows continuous quantitative variables.
+
+4. What other aesthetics (color, fill, shape, transparency, etc.) did they use to make their point clearer?  
+color = Species_Code was used to make it easier to tell pairs of data points apart. Colored lines were drawn between paired data points.
+
+5. Recreate McGuire et al.'s Figure 3H. You can pipe species_lifespan to a call to ggplot. Remember to add error bars (See hw2_in_class.Rmd, Part III, Sections 2 and 3)
+
+```{r}
+species_lifespan %>%
+  ggplot(aes(x = Treatment, y = Lifespan, color = Species_Code)) +
+  geom_point() +
+  geom_line(aes(group = Species_Code)) +
+  geom_errorbar(
+    aes(ymin= Lifespan - SE_Lifespan, ymax = Lifespan + SE_Lifespan),
+    width = 0.2) +
+  scale_x_discrete(labels = c("PLANTED", "SEEDED")) +
+  scale_y_continuous(name = "Mean Estimated Time to Death (days)",
+                     limits = c(0, NA), # by default the lower limit shown was y=200
+                     breaks = seq(0, 1000, by = 200)) + # changing the y limit changed the y axis tick marks
+  theme_classic()
+```
+
+## Part 5: Synthesizing the results (4 points)
+
+Imagine you are advising land managers on how to restore coastal sage shrub habitat. Based on these results, what would you tell them about the benefits of seeding native shrubs versus growing and transplanting native shrubs if:
+
+1. They don't care about exactly which species grow in the habitat and just want to get a relatively dense coverage of diverse native shrubs as cheaply as possible.  
+Seeding is the better option because it achieves much greater shrub density than transplanting does, as shown in McGuire et al.'s Figure 2B. Seeding also achieves higher percent coverage, as shown in McGuire et al.'s Figure 2A.
+
+2. They are especially concerned about having a subset of shrub species that will provide food to native specialist pollinators.  
+As shown in McGuire et al.'s Figure 3H, many species have a higher lifespan when transplanted than when seeded, while only a few have a higher lifespan when seeded than when transplanted. Unless planting species with codes ACMGLA or ATRLEN, transplanting would be the better option.
+
+
+## Extra Credit: Joining data frames (4 Points)
+
+See the optional last part of the hw3_in_class files for a guide to joining data frames.
+
+1. Join the treatment data frames we created above using full_join (you'll have to use the function twice because it can only join 2 data frames at a time) and save them as a new data frame called treatment_summaries:
+
+```{r}
+treatment_summaries <- treatment_cover %>%
+  full_join(treatment_density, by = "Treatment")
+```
+
+2. Join the species data frames we created above using full_join and save them as a new data frame called species_summaries:
+
+```{r}
+species_summaries <- species_lifespan %>%
+  full_join(species_cover, by = c("Species_Code", "Treatment"))
+```

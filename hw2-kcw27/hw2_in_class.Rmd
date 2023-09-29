@@ -1,0 +1,519 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# File metadata
+
+Template author: Morgan Carr-Markell  
+Template last modified on: Jan 30th, 2023  
+Notebook modified by: Katie Wang 
+Notebook last modified on: Feb 4th, 2023  
+
+
+# Part I: In-class Activity- LTER Data Sets (5 points)
+
+## Section 1
+
+Go to the Long Term Ecological Research (LTER) Network sites website (https://lternet.edu/site/)
+
+1. Choose one LTER (not the Palmer Station Antarctica site because we’ll look at that in a minute) that sounds interesting to you and click on its link to look at the site summary page. When was it established and what sorts of data have been collected there?
+
+*I'm looking at the North Temperate Lakes LTER (https://lternet.edu/site/north-temperate-lakes-lter/). It was established in 1981. They are investigating the effects of coarse woody habitat on communities of bluegill and largemouth bass. They are tracking the physical, biological, and chemical properties of the lakes over time, including information on land use and the socioeconomic characteristics of human populations living within the watersheds.*
+
+
+## Section 2
+
+Next, go to the Palmer Station Antarctica LTER website (https://pallter.marine.rutgers.edu/), and read the two paragraphs describing the research site.
+
+Then go to the seabirds research site which the R palmerpenguins dataset came from (https://pallter.marine.rutgers.edu/research-components-labs/seabirds/)
+
+2. What questions are they asking about penguins?
+*They are studying how the factors of chronology and biology of breeding, foraging ecology, and population dynamics affect the penguin population.*
+
+
+3. What kinds of data are they collecting?
+*Surveys of penguin abundance, interaction with predators, etc.*
+
+
+Glossary of terms they use on website:
+
+* breeding chronology= timing of breeding events throughout the year
+* landscape geomorphology= changes in elevation across the landscape
+* source-sink population dynamics= high-quality habitat areas promote population growth (sources) while low-quality habitat areas cause population decline (sinks)
+		
+		
+## Section 3
+
+Now we’re going to find the three datasets that palmerpenguins combines at this Palmer LTER catalog page (https://pallter.marine.rutgers.edu/catalog/edi/)
+
+Search using “penguin structural” in the Search box and “Gorman, Kristen” in the Creator box.
+
+You should see 8 results, and the first three include the data in the palmerpenguins dataset on the size measurements of three species of penguins.
+
+Click on the first dataset (it should take you here: https://portal.edirepository.org/nis/mapbrowse?packageid=knb-lter-pal.219.5)
+
+You’ll notice that there are many categories of information here, including a title, full citation with DOI (digital object identifier), abstract, metadata report, link to download a zip file of the data, and an intellectual rights section (among other sections).
+
+4. According to the abstract, what question was this study attempting to answer?
+*The author was testing the hypothesis that there would be some kind of correlation between variation in winter sea ice and the foraging niches that the Pygoscelis penguins fall into based on their sexual dimorphism in size.*
+
+
+
+5. What is the license and what permissions does it give?
+*It's a Creative Commons CC0 1.0 No Rights Reserved license, which means that it's free to use for anything and we can modify it. It's common courtesy to cite any packages used.*
+
+
+
+___
+
+# Part II: In-class Activity- Online chapter (5 points)
+
+Go to the following online chapter and read until you get to the first exercise, then return to this R Notebook to complete it:
+
+"Data Visualization." _R for Data Science, 2nd Edition_ by Hadley Wickham, Garrett Grolemund, and Mine Çetinkaya-Rundel (https://r4ds.hadley.nz/data-visualize.html)
+
+
+## Citation for palmerpenguins data set:
+
+Horst AM, Hill AP, Gorman KB (2020). palmerpenguins: Palmer Archipelago (Antarctica) penguin data. R package version 0.1.0. https://allisonhorst.github.io/palmerpenguins/. doi: 10.5281/zenodo.3960218.
+
+
+---
+
+## 2.1 to 2.2.4
+
+See https://r4ds.hadley.nz/data-visualize.html
+
+---
+
+### 2.2.5 Exercises
+
+This chapter focuses on ggplot2, one of the core packages in the tidyverse. If you haven't yet installed the tidyverse package, run this code in the console:
+
+install.packages("tidyverse")
+
+And run:
+
+install.packages("palmerpenguins")
+
+Then load these packages:
+
+```{r}
+library(tidyverse)
+library(palmerpenguins)
+#theme_set(theme_classic())
+```
+
+1. How many rows are in penguins? How many columns?
+```{r}
+str(penguins)
+```
+This summary shows that penguins has 344 rows (observations) and 8 columns (variables).
+
+
+2. What does the bill_depth_mm variable in the penguins data frame describe? Read the help for ?penguins to find out.
+From the help page: "a number denoting bill depth (millimeters)"
+
+
+3. Make a scatterplot of bill_depth_mm vs. bill_length_mm. Describe the relationship between these two variables.
+```{r}
+ggplot(data = penguins, mapping = aes(x = bill_depth_mm, y = bill_length_mm)) +
+  geom_point() +
+  geom_smooth(method = lm) +
+  xlab("Bill depth (mm)") +
+  ylab("Bill length (mm)")
+```
+There is a negative correlation between bill length and bill depth.
+
+
+3. What happens if you make a scatterplot of species vs. bill_depth_mm? Why is the plot not useful?
+
+```{r}
+ggplot(data = penguins, mapping = aes(x = species, y = bill_depth_mm)) +
+  geom_point() +
+  ylab("Bill depth (mm)") +
+  xlab("Species")
+```
+Species is a categorical variable. If it were an ordinal variable, it could make sense to fit a line to the plot to determine how strongly the species and bill depth are correlated. However, since there's no inherent order to the levels of the species variable, all this really shows is a range of bill depths for the three different species.
+
+4. Why does the following give an error and how would you fix it?
+
+ggplot(data = penguins) + 
+  geom_point()  
+
+This code fails to specify the x and y mapping argument, so it has no information on what variables to plot on the x and y axes.
+
+5. What does the na.rm argument do in geom_point()? What is the default value of the argument?  
+na.rm determines whether R gives you a warning about missing values being removed from the plot. Either way, R won't plot points with missing values, but if na.rm = FALSE (which is the default) R will warn you about it because it is something you need to take into account. If na.rm = TRUE, R won't give you that warning.
+
+6. Create a scatter plot where you successfully use this na.rm set to TRUE.
+
+```{r}
+ggplot(data = penguins, mapping = aes(x = flipper_length_mm, y = body_mass_g)) +
+  geom_point(na.rm = TRUE)
+```
+
+
+7. Add the following caption to the plot you made in the previous exercise: “Data come from the palmerpenguins package.” Hint: Take a look at the documentation for labs().
+
+```{r}
+ggplot(data = penguins, mapping = aes(x = flipper_length_mm, y = body_mass_g)) +
+  geom_point(na.rm = TRUE) +
+  labs(caption = "Data come from the palmerpenguins package.")
+```
+
+8. Recreate the following visualization [link](https://r4ds.hadley.nz/data-visualize_files/figure-html/unnamed-chunk-18-1.png). What aesthetic should bill_depth_mm be mapped to? And should it be mapped at the global level or at the geom level?
+
+```{r}
+ggplot(data = penguins, 
+       mapping = aes(x = flipper_length_mm, y = body_mass_g)) +
+  geom_point(na.rm = TRUE, 
+             mapping = aes(color = bill_depth_mm)) +
+  geom_smooth(na.rm = TRUE)
+```
+bill_depth_mm should be mapped locally to geom_point() because the coloring should only apply to geom_point and not to the line running through the data.
+
+9. Run this code in your head and predict what the output will look like. Then, run the code in R and check your predictions.
+
+```{r}
+ggplot(
+  data = penguins,
+  mapping = aes(x = flipper_length_mm, y = body_mass_g, color = island)
+) +
+  geom_point() +
+  geom_smooth(se = FALSE)
+```
+Predictions: This will be a scatter plot with flipper length on the x axis, body mass on the y axis, and colored by island (i.e. three colors). There will be a smooth line running through, but no confidence interval around it because se = FALSE.  
+Actual: there were three geom_smooth lines, one for each island. It appears that the color aesthetic, which was mapped globally, caused geom_smooth to plot three separate lines.
+
+10. Will these two graphs look different? Why/why not?
+
+ggplot(
+  data = penguins,
+  mapping = aes(x = flipper_length_mm, y = body_mass_g)
+) +
+  geom_point() +
+  geom_smooth()
+
+ggplot() +
+  geom_point(
+    data = penguins,
+    mapping = aes(x = flipper_length_mm, y = body_mass_g)
+  ) +
+  geom_smooth(
+    data = penguins,
+    mapping = aes(x = flipper_length_mm, y = body_mass_g)
+  )
+  
+These two graphs will look exactly the same. Entering the data and mapping arguments globally (i.e. in ggplot()) achieves the same thing as entering them locally to all things drawn on the plot (i.e. in geom_point() and geom_smooth()).
+
+---
+
+## 2.3 to 2.4.2
+
+See https://r4ds.hadley.nz/data-visualize.html
+
+---
+
+### 2.4.3 Exercises
+
+1. Make a bar plot of species of penguins, where you assign species to the y aesthetic. How is this plot different?
+```{r}
+penguins |> # I wasn't aware that |> was a way to pipe things in R
+  ggplot(aes(y = species)) +
+  geom_bar()
+```
+While the example in the textbook had x = species with the y axis used for counts, this plot has species on the y axis, which means that the x axis is used for counts.
+
+
+2. How are the following two plots different? Which aesthetic, color or fill, is more useful for changing the color of bars?
+
+```{r}
+ggplot(penguins, aes(x = species)) +
+  geom_bar(color = "red")
+```
+
+```{r}
+ggplot(penguins, aes(x = species)) +
+  geom_bar(fill = "red")
+```
+Fill is more useful for changing the colors of the bars than color is, since color only changes the outline color. Fill changes the entire bar to the color specified.
+
+3. What does the bins argument in geom_histogram() do?  
+The bin width determines the size of the numerica ranges over which values are grouped together in a histogram. 
+
+
+4. Make a histogram of the carat variable in the diamonds dataset. Experiment with different binwidths. What binwidth reveals the most interesting patterns?
+
+```{r}
+diamonds %>%
+  ggplot(aes(x=carat)) +
+  geom_histogram(binwidth = 0.02)
+
+diamonds %>%
+  ggplot(aes(x=carat)) +
+  geom_histogram(binwidth = 0.4)
+
+diamonds %>%
+  ggplot(aes(x=carat)) +
+  geom_histogram(binwidth = 1)
+```
+The intermediate bin width I chose (0.4) yielded the best image of the distribution of the carat variable. A bin width that's too small (e.g. 0.02) will result in a confusing plot, while a bin width that's too large (e.g. 1) doesn't give enough resolution.
+
+---
+
+## 2.5 to 2.5.4
+
+See https://r4ds.hadley.nz/data-visualize.html
+
+---
+
+### 2.5.5 Exercises
+
+1. Which variables in mpg are categorical? Which variables are continuous? (Hint: type ?mpg to read the documentation for the dataset). How can you see this information when you run mpg?  
+The categorical variables in mpg are: manufacturer, model, trans, drv, fl, and class.  
+The continuous variables in mpg are: displ, year, cyl, cty, and hwy.  
+You can use head(mpg) to preview the names and types of variables, as well as the first few rows of the dataframe.
+
+2. Make a scatterplot of hwy vs. displ using the mpg data frame. Next, map a third, numerical variable to color, then size, then both color and size, then shape. How do these aesthetics behave differently for categorical vs. numerical variables?  
+```{r}
+mpg %>%
+  ggplot(aes(x = hwy, y = displ)) +
+  geom_point()
+
+mpg %>%
+  ggplot(aes(x = hwy, y = displ, color = year)) +
+  geom_point()
+
+mpg %>%
+  ggplot(aes(x = hwy, y = displ, size = year)) +
+  geom_point()
+
+mpg %>%
+  ggplot(aes(x = hwy, y = displ, color = year, size = year)) +
+  geom_point()
+
+mpg %>%
+  ggplot(aes(x = hwy, y = displ, shape = year)) +
+  geom_point()
+```
+For numerical variables, color and size are selected from a gradient. Numerical values can't be used with the shape aesthetic, since there aren't an infinite number of shapes to assign to the infinite possibilities for numerical values.  
+Categorical variables work just fine with colors, and are assigned colors that aren't selected from a gradient. They also work with shape. They technically work with size, but R warns you against doing this.
+
+3. In the scatterplot of hwy vs. displ, what happens if you map a third variable to linewidth?
+```{r}
+mpg %>%
+  ggplot(aes(x = hwy, y = displ, linewidth = year)) +
+  geom_point()
+```
+Nothing happens because linewidth isn't used by geom_point().
+
+4. What happens if you map the same variable to multiple aesthetics?  
+R is still able to generate a plot, but it's redundant to show that information through multiple aesthetics. For example, in problem 2 of this section I mapped year to both size and color.
+
+5. Make a scatterplot of bill_depth_mm vs. bill_length_mm and color the points by species. What does adding coloring by species reveal about the relationship between these two variables?
+```{r}
+penguins %>%
+  ggplot(aes(x = bill_depth_mm, y = bill_length_mm, color = species)) +
+  geom_point()
+```
+Coloring the scatter plot by species gives us a sense of the relationship between bill length and bill depth for each species.
+
+6. Why does the following yield two separate legends? How would you fix it to combine the two legends?
+
+```{r}
+ggplot(
+  data = penguins,
+  mapping = aes(
+    x = bill_length_mm, y = bill_depth_mm, 
+    color = species, shape = species
+  )
+) +
+  geom_point() +
+  labs(color = "Species")
+
+# my version of the code
+ggplot(
+  data = penguins,
+  mapping = aes(
+    x = bill_length_mm, y = bill_depth_mm, 
+    color = species, shape = species
+  )
+) +
+  geom_point() +
+  labs(color = "Species", shape = "Species")
+```
+In the labs() call, only color was labeled "Species", so size continued to be labeled by its default name, the variable name "species". This was fixed by assigning the label "Species" to both size and color.
+
+---
+
+## 2.6 
+
+See https://r4ds.hadley.nz/data-visualize.html
+
+---
+
+### 2.6.1 Exercises
+
+1. Run the following lines of code. Which of the two plots is saved as mpg-plot.png? Why?
+
+```{r}
+ggplot(mpg, aes(x = class)) +
+  geom_bar()
+ggplot(mpg, aes(x = cty, y = hwy)) +
+  geom_point()
+ggsave("figures/map-plot.png")
+
+# saving as a PDF instead of PNG
+ggsave("figures/map-plot.pdf")
+```
+The second plot is the one saved as the PNG, because ggsave() saves the most recent plot.
+
+2. What do you need to change in the code above to save the plot as a PDF instead of a PNG?
+I changed the filename extension from png to pdf, and it saved the figure as a PDF.
+
+---
+
+## 2.7 to 2.8
+
+See https://r4ds.hadley.nz/data-visualize.html
+
+
+
+---
+
+# Part III: Column charts, line graphs, and error bars
+
+Three things not covered in the online "Data Visualization" chapter that you will need for the rest of your homework are how to: 
+
+* create column charts
+* create line graphs
+* add error bars to plots
+
+
+## Section 1: Column charts
+
+A column chart is one way to compare means or medians across groups. Ideally, it's best to show the distribution of data using plots like histograms, density plots, box plots, and violin plots. However, means with error bars around them are often used to summarize and compare values across different groups.
+
+In a column chart, each column is associated with a different categorical variable and the top of the columns are the means (or maybe medians or other measures) of a quantitative variable. In ggplot, we use geom_col() for this.
+
+Let's look at an example:
+
+First, we'll summarize body mass by species (you'll learn more about these dplyr functions next week)
+
+```{r}
+library(dplyr)
+
+penguins_summary <- penguins %>%
+  group_by(species) %>%
+  summarize(
+    mean_body_mass = mean(body_mass_g, na.rm = T),
+    se_body_mass = sd(body_mass_g, na.rm = T) / sqrt(n()))
+```
+
+Now we can make our plot
+
+```{r}
+ggplot(data = penguins_summary, mapping = aes(x = species, y = mean_body_mass)) +
+  # we add geom_col(), which inherits the x and y mappings from the call to ggplot above
+  geom_col() +
+  # then we can format the labels
+  labs(x = "Species", y = "Body Mass (g)")
+```
+
+
+## Section 2: Line graphs
+
+A line graph is usually used to show changes in a quantitative variable over time. It contains points, like a scatter plot does, but in a line graph those points are connected by lines. In ggplot, we generally make line graphs using both geom_point() and geom_line()
+
+Here's an example using the penguins data: 
+
+First, we'll summarize by year and sex and just look at data from chinstrap penguins (again, you'll learn more about these functions next week)
+
+```{r}
+chinstrap_summary <- penguins %>%
+  filter(species == "Chinstrap") %>%
+  group_by(year, sex) %>%
+  summarize(mean_body_mass = mean(body_mass_g))
+```
+
+Now we can make a line graph
+
+```{r}
+ggplot(data = chinstrap_summary, mapping = aes(x = year, y = mean_body_mass, color = sex)) +
+  # now that we have aesthetics set, we'll add points/lines
+  geom_point() +
+  geom_line() +
+  # to make the x axis clearer, we'll manually set breaks
+  scale_x_discrete(breaks = c(2007, 2008, 2009)) +
+  # and format the labels
+  labs(x = "Year", y = "Body Mass (g)", color = "Sex")
+```
+
+So we get a sense of how body mass changed over time for each group.
+
+However, sometimes people use line graphs to show differences in the effect of a variable among individuals or subgroups. In that case, the x axis may be a categorical variable like sex or species. To tell geom_line() how to connect the points, we need to add one more aesthetic mapping: group. This tells ggplot which variable to use when connecting points in the line plot.
+
+Here's an example:
+
+First, we'll summarize the data by species and sex (again, you'll learn more about these functions next week)
+
+```{r}
+penguins_summary2 <- penguins %>%
+  filter(!is.na(sex)) %>%
+  group_by(species, sex) %>%
+  summarize(mean_body_mass = mean(body_mass_g))
+```
+
+Now we can make a different kind of line graph
+
+```{r}
+ggplot(data = penguins_summary2, mapping = aes(x = sex, y = mean_body_mass, color = species, group = species)) +
+  # notice the extra group aesthetic above that we mapped to species
+  geom_point() +
+  geom_line() +
+  labs(x = "Sex", y = "Body Mass (g)")
+
+# modified for question 1
+ggplot(data = penguins_summary2, mapping = aes(x = species, y = mean_body_mass, color = sex, group = species)) +
+  # notice the extra group aesthetic above that we mapped to species
+  geom_point() +
+  geom_line() +
+  labs(x = "Sex", y = "Body Mass (g)")
+```
+
+Here, our x axis is sex and the subgroups we are interested in are species.
+
+1. Try changing sex to species and species to sex in the code above. How does the plot change?  
+Rather than sex being the x axis and species being the colors, now species are the x axis and sex is the colors.
+
+2. Try deleting the group aesthetic mapping in the ggplot call above and running the code chunk again. What does the error message say?  
+The error message says "[38;5;232m`geom_line()`: Each group consists of only one observation. [36mℹ[38;5;232m Do you need to adjust the [32mgroup[38;5;232m aesthetic?[39m".
+
+## Section 3: Error bars
+
+Error bars help give a sense of the variation around some measure of central tendency like a mean or median. The three most common types you will see in published papers are standard deviations, standard errors, and confidence intervals.
+
+So how do we use ggplot to add them to our plots? We use geom_errorbar(). This geom has its own special aesthetic mappings, ymin and ymax, which each require calculations using the mean/median variable in our data set **and** the variable that contains the length of the error bar we want (e.g., the standard error).
+
+Let's look at an example (if you haven't yet run the code chunk above to create the penguins_summary data frame, you should do that before running the chunk below):
+
+Now we can make our column chart with error bars added:
+
+```{r}
+ggplot(data = penguins_summary, mapping = aes(x = species, y = mean_body_mass)) +
+  # add the columns based on those aesthetic mappings
+  geom_col() +
+  # add the error bars and 
+  # specify the ymin and ymax mappings (calculated with the mean and standard error)
+  geom_errorbar(
+    aes(ymin = mean_body_mass - se_body_mass, ymax = mean_body_mass + se_body_mass), 
+    # the geom_errorbar width parameter sets the width of caps on the bars
+    width = 0.2) + 
+  labs(x = "Species", y = "Body Mass (g)")
+```
+
+You'll probably want to refer back to these examples when doing the independent part of the homework.
+
+Nice work! You've learned a lot about ecological data sources, the grammar of ggplot, and how to visualize data in many different ways.

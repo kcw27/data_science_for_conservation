@@ -1,0 +1,358 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## File metadata
+
+Template author: Morgan Carr-Markell  
+Template last modified on: Feb 21, 2023  
+Notebook modified by: Katie Wang  
+Notebook last modified on: Feb 28, 2023
+
+
+## Libraries
+
+```{r, messages=FALSE}
+library(sf)  # simple features, vector mapping package
+library(dplyr)
+library(tidyverse)  # I added this
+library(ggplot2)
+library(scico)  # contains color/fill palettes for plotting
+library(rnaturalearth)  # Natural Earth functions (ex. ne_countires)
+library(rnaturalearthdata)  # vector data from Natural Earth
+library(rgbif)
+```
+
+
+## Part 3: Country
+
+### 3.1 Creating sf objects for a country of interest (3 pts)
+
+You can choose any country that is of interest to you, although larger countries may have more occurrence records. Your job in this section is to use the rnaturalearth and tidyverse functions to create an sf object that contains only the country you are interested in.
+
+Refer to the hw4_in_class.Rmd section 1.5 directions to see the steps and functions you'll need to use. Remember to check how the country's name (sovereignt column) is written in the sf object created by the rnaturalearth::ne_countries function!
+
+1.
+```{r}
+# first generate a world map
+worldMap <- ne_countries(scale = "medium", type = "countries", returnclass = "sf")
+
+# then filter down to just the United States
+USpoly <- worldMap %>%
+  filter(sovereignt == "United States of America",
+         type == "Country")
+# have to filter by type to exclude dependencies
+```
+
+2. Look in the Environment pane. How many observations does this sf object have? (If it isn't 1, check your code for errors)  
+There is one observation in the USpoly sf object, now that I've filtered out the US dependencies.
+
+
+### 3.2 Creating an sf object for neighboring countries (2 pts)
+
+Your job in this section is to use the rnaturalearth and tidyverse functions to create an sf object that contains only the countries that border the country that you are interested in. If there are many countries, it might be useful to store a list of the country names and use:
+
+filter(sovereignt %in% country_list)
+
+Refer to the hw4_in_class.Rmd section 1.5 directions to see the steps and functions you'll need to use.
+
+3. 
+```{r}
+# which(): returns indices for which the logical statements are true
+indices <- which(worldMap$sovereignt == "Canada" | worldMap$sovereignt == "Mexico")
+#slice(): selects the rows of the dataframe that are specified by the indices
+neighbors <- worldMap %>%
+  slice(indices)
+```
+
+4. Look in the Environment pane. How many observations does this sf object have? (If it doesn't match the number of countries, check your code for errors)  
+There are two observations, which is expected.
+
+
+### 3.3 Get coordinates to crop your map (2 pts)
+
+Next you will need to decide on the coordinates to use in cropping your map.
+
+Refer to the hw4_in_class.Rmd section 1.6.1 directions to see the steps and functions you'll need to use.
+
+5.
+```{r}
+limsUS <- st_buffer(USpoly, dist = 0.7) %>%
+  st_bbox()
+
+limsUS
+```
+
+
+### 3.4 Create a map to check your work (3 pts)
+
+Next, map both your country of interest and the surrounding countries using ggplot, and make them different colors.
+
+If you find that the bounding box is too wide because the country has far-off territories (e.g., if you are trying to map the continental United States), manually change the xlim and ylim values in coord_sf so that they are more reasonable longitude and latitude bounds. Remember that west is negative and east is positive. You'll may need to try a few sets of limit values. Once you are happy with the results, use these same limits for later maps.
+
+Refer to the hw4_in_class.Rmd section 1.6.2 directions to see the steps and functions you'll need to use.
+
+6.
+```{r}
+#I'll edit limsUS to have the change in maximum x limit
+limsUS["xmax"] <- -50
+
+ggplot() +
+  geom_sf(data = neighbors, fill = "white") +
+  geom_sf(data = USpoly) +
+  coord_sf(
+    xlim = c(limsUS["xmin"], limsUS["xmax"]),
+    ylim = c(limsUS["ymin"], limsUS["ymax"])
+  ) +
+  theme(
+    plot.background = element_rect(fill = "#f1f2f3"),
+    panel.background = element_rect(fill = "#2F4051"),
+    panel.grid = element_blank(),
+    line = element_blank(),
+    rect = element_blank()
+  )
+```
+
+7. Did you have to adjust the limits? If so, what limits did you try?  
+I plotted the US, so I had to change the upper x limit from xmax (in limsUS) to -50 (which is 50 W). xmax was originally 179.66439 while xmin was -180.00000, so the map originally wrapped around the entire Earth.
+
+## Part 4: Occurrence records
+
+Next, you'll need to choose a taxon of organisms that occur within your country of interest. This can be an order, family, or even a genus that contains many species (with too few species, maps of species richness are not very interesting but with too many, the download will take a very long time and may make RStudio slow).
+
+### 4.1 Using name_suggest to get taxon keys (3 pts)
+
+Next, you'll use the name_suggest() function from rgbif to get the taxon key number for that taxon. Here you'll want to look at the data frame. The function may suggest keys from similarly spelled taxa that you don't want to include. Just extract one key number (or you can copy and paste the taxon key number in section 4.2 if you're having trouble extracting it with code).
+
+Refer to the hw4_in_class.Rmd section 2.2.1 directions to see the steps and functions you'll need to use.
+
+8.
+```{r}
+amphibian_id_no <- name_suggest(q = "amphibia", rank = "class")
+
+# view the output of name_suggest
+amphibian_id_no
+
+# get the key
+amphibian_id_no <- amphibian_id_no$data %>%
+  select(key) %>%
+  pluck(1) # pluck() is used to get an element in a nested data structure
+
+amphibian_id_no
+```
+
+9. What taxa did name_suggest return?  
+Amphibia (class)
+
+10. Which taxon key number did you choose?  
+131
+
+
+### 4.2 Download occurrence records (3 pts)
+
+First, you'll want to look up the 2-letter code for your country [here](https://www.iso.org/obp/ui/#search).
+
+The occ_search run may take some time depending on how many records there are for your taxon in your country of interest!
+
+If you find that "basisOfRecord = "PRESERVED_SPECIMEN" is giving you very few records, you could try "basisOfRecord = "OCCURRENCE" instead, which will give you all recorded occurrences of the taxon. I would recommend setting the limit to 10000 to get as many records as the function will allow.
+
+11.
+```{r}
+USamphibiansout <- occ_search(
+  classKey = amphibian_id_no, # Amphibia is a class, hence the usage of classKey
+  country = "US", # two-letter code from iso.org
+  basisOfRecord = "PRESERVED_SPECIMEN",
+  limit = 10000
+)$data
+```
+
+12. How many records are there in this data frame?
+There are 10,000 records in this data frame.
+
+
+### 4.3 Clean occurrence points (2 pts)
+
+Next, select only the species, decimalLongitude, and decimalLatitude columns, and filter the records to get rid of rows with NA in the decimalLongitude or decimalLatitude columns.
+
+Refer to the hw4_in_class.Rmd section 2.3.1 directions to see the steps and functions you'll need to use.
+
+13.
+```{r}
+USamphibiansXY <- USamphibiansout %>%
+  select(species, decimalLongitude, decimalLatitude) %>%
+  na.omit()
+# when cleaning data, it's best practice to preserve the original df
+```
+
+14. How many records are there now?  
+There are 9,707 records remaining.
+
+
+### 4.4 Convert occurrences to sf object (2 pts)
+
+Then create an sf object using the cleaned occurrence point data frame, specifying which columns to use as x and y coordinates and what crs to use (4326).
+
+Refer to the hw4_in_class.Rmd section 2.3.2 directions to see the steps and functions you'll need to use.
+
+15.
+```{r}
+USamphibiansXYsf <- st_as_sf(USamphibiansXY,
+                             coords = c("decimalLongitude", "decimalLatitude"),
+                             crs = 4326)
+```
+
+
+### 4.5 Summarize sf object by species (2 pts)
+
+Use the group_by() and summarize() functions to summarize the occurrence points.
+
+Refer to the hw4_in_class.Rmd section 2.3.4 directions to see the steps and functions you'll need to use.
+
+16.
+```{r}
+USamphibiansXYsf <- USamphibiansXYsf %>%
+  group_by(species) %>%
+  summarize()
+```
+
+17. How many species are there among these records? (Hint: look at the number of observations in the summarized sf object)  
+There are 148 species in these records.
+
+
+### 4.6 Plot the processed occurrence data (2 pts)
+
+Recreate the map you made in 3.4 above, but add the processed points to it, with the color aesthetic mapped to species.
+
+Refer to the hw4_in_class.Rmd section 2.4 directions to see the steps and functions you'll need to use.
+
+18.
+```{r}
+ggplot() +
+  geom_sf(data = neighbors, fill = "white") +
+  geom_sf(data = USpoly) +
+  geom_sf(data = USamphibiansXYsf, aes(color = species), pch = 21, show.legend = F) +
+  coord_sf(
+    xlim = c(limsUS["xmin"], limsUS["xmax"]),
+    ylim = c(limsUS["ymin"], limsUS["ymax"])
+  ) +
+  theme(
+    plot.background = element_rect(fill = "#f1f2f3"),
+    panel.background = element_rect(fill = "#2F4051"),
+    panel.grid = element_blank(),
+    line = element_blank(),
+    rect = element_blank()
+  )
+```
+
+
+## Part 5: Creating a species richness grid
+
+### 5.1 Create a grid across the country of interest (3 pts)
+
+Now you will create a multipolygon grid spanning your country of interest. You'll want to map it using ggplot and geom_sf to test out different cellsizes and see which seems most reasonable to you, considering the distribution of the points on the map in 4.6. It helps to use larger cellsizes for larger countries and smaller cellsizes for smaller countries. This may take some time to run, but if it takes longer than a minute, stop the run and try a larger cellsize.
+
+Refer to the hw4_in_class.Rmd section 2.5.1 directions to see the steps and functions you'll need to use.
+
+19.
+```{r}
+USgrid <- USpoly %>%
+  st_make_grid(cellsize = 1) %>%
+  st_intersection(USpoly) %>%
+  st_cast("MULTIPOLYGON") %>%
+  st_sf() %>%
+  mutate(cellid = row_number())
+
+# to quickly check grid size
+ggplot() +
+  geom_sf(data = USgrid) +
+  coord_sf(
+  xlim = c(limsUS["xmin"], limsUS["xmax"]),
+  ylim = c(limsUS["ymin"], limsUS["ymax"])
+  )
+```
+
+20. What cellsizes did you try?  
+I tried sizes 0.5, 1, and 2. Size 0.5 took a while to load. I went with size 1 because it provides better resolution than size 2.
+
+
+
+### 5.2 Combining the grid with species occurrences (2 pts)
+
+Next, combine the grid you just made with the species occurrence points and use the mutate, group_by, and summarize functions to calculate species richness.
+
+Refer to the hw4_in_class.Rmd section 2.5.2 directions to see the steps and functions you'll need to use.
+
+**Note:** If you get a warning about duplicate edges or vertices, try turning off the s2 geometry library temporarily before you combine the grid and points and then turning it back on with this code:
+
+sf::sf_use_s2(FALSE) # turns it off
+
+Your code to combine the grid and points here
+
+sf::sf_use_s2(FALSE) # turns it back on
+
+Also, if you turn s2 off, you will encounter many error messages ("although coordinates are longitude/latitude, st_intersects assumes that they are planar"), which is annoying but fine. The s2 library represents all data on a three-dimensional sphere, which occasionally causes problems with sf functions that were written using older geographic information systems. The st_join() function should work properly despite those warnings.
+
+21.
+```{r}
+#sf::sf_use_s2(FALSE)
+
+amphibian_richness_grid <- USgrid %>%
+  st_join(USamphibiansXYsf) %>%
+  mutate(overlap = ifelse(!is.na(species), 1, 0)) %>%
+  group_by(cellid) %>%
+  summarize(num_species = sum(overlap))
+
+#sf::sf_use_s2(TRUE)
+```
+
+
+### 5.3 Plot species richness (2 pts)
+
+Now you have everything you need to plot species richness for that taxon across your country of interest. Use the same map setup as in 4.6, except add the species richness grid instead of the occurrence points. In your plot, set background colors and use whatever color palette you think works best for the species richness (if you want to use non-scico palettes, you can learn about several [here](https://www.datanovia.com/en/blog/top-r-color-palettes-to-know-for-great-data-visualization/))
+
+Refer to the hw4_in_class.Rmd section 2.5.3 directions to see the steps and functions you'll need to use.
+
+22.
+```{r}
+ggplot(data = amphibian_richness_grid) +
+  geom_sf(data = neighbors, fill = "black") +
+  geom_sf(data = USpoly, fill = "grey", size = 0.1) +
+  geom_sf(aes(fill = num_species), color = NA) +
+  scale_fill_scico(palette = "bilbao", end = 0.9, name = "Amphibian species richness") +
+  coord_sf(
+    xlim = c(limsUS["xmin"], limsUS["xmax"]),
+    ylim = c(limsUS["ymin"], limsUS["ymax"])
+  ) +
+  theme(
+    plot.background = element_rect(fill = "#f1f2f3"),
+    panel.background = element_rect(fill = "#2F4051"),
+    panel.grid = element_blank(),
+    line = element_blank(),
+    rect = element_blank()
+  )
+```
+
+## Part 6: Interpreting the map (4 pts)
+
+23. Where in the country was species richness highest for this taxon?  
+Species richness for Amphibia was highest in Florida, Virginia, and North Carolina.
+
+
+24. Where was species richness low?  
+Species richness was low to the west of the Rockies and in Alaska and Hawaii.
+
+
+25. Look at some maps of the country online. Are there any geographical features that seem like they might be associated with diversity in this taxon (coasts, mountains, rivers, etc.)?  
+Frogs and toads, which are members of the class Amphibia, show the greatest diversity in humid tropical environments (https://www.britannica.com/animal/amphibian/General-features). Amphibians are cold-blooded, so they do better in warm environments. While the US does not have any tropical climates, the distribution of its humid climates (https://en.wikipedia.org/wiki/Climate_of_the_United_States#/media/File:K%C3%B6ppen_Climate_Types_US_50.png) is consistent with the observed amphibian species richness.
+
+
+## Part 7: Extra Credit (+3 pts)
+
+For up to three extra credit points, go look at the "Sharing the Collection of Barbara Drake: Tongva Elder, Educator, Ethnobotanist" exhibit in the North Lobby Gallery of the Claremont Colleges Library (exhibit will be there until Monday), and answer these questions:
+
+1. Who was Barbara Drake and what did she advocate for?  
+Barbara Drake was a Tongva elder who kept Californian Indian traditions alive by presenting lectures and holding workshops at local schools. She also pushed back against the use of the Puvugna sacred site as overflow parking by California State University Long Beach.
+
+2. What are 2-3 things that you learned from the exhibit about Tongva views of the natural world?  
+The Tongva emphasize a reciprocal relationship with the land and the importance of showing respect to the natural world. For example, overharvesting is discouraged, and even plants commonly considered weeds (e.g. the stinging nettle) should be treated with respect. They also used all parts of the plant when they could. For example, yucca leaves were used to make shoes or ropes, while yucca flowers were prepared as food.

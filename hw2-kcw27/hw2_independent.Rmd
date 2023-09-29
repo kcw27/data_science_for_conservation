@@ -1,0 +1,304 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# File metadata
+
+Template author: Morgan Carr-Markell  
+Template last modified on: Jan 31st, 2023  
+Notebook modified by: Katie Wang
+Notebook last modified on: Feb 6th, 2023  
+
+
+# Part IV: Exploring the original penguins data set
+
+The R palmerpenguins library also includes a second data set, showing the original data published in this study:
+
+Gorman KB, Williams TD, Fraser WR (2014). Ecological sexual dimorphism and environmental variability within a community of Antarctic penguins (genus Pygoscelis). PLoS ONE 9(3):e90081. https://doi.org/10.1371/journal.pone.0090081
+
+
+## Section 1: Looking at the penguins_raw data set
+
+Let's see what variables we have to work with. We'll import a library called dplyr so we can use the function glimpse:
+
+```{r}
+library(dplyr)
+library(palmerpenguins)
+
+glimpse(penguins_raw)
+```
+
+So we see some differences from the penguins data set. Bill is called culmen in this data set and we have some new variables, including 'Delta 15 N (o/oo)' and 'Delta 13 C (o/oo)'.
+
+Those delta variables are measurements of isotope ratios, which help differentiate organisms based on their position in a food web:
+
+* __Nitrogen ratios:__ A predator that mostly eats herbivores will tend to have a lower N15 to N14 isotope ratios than a predator that mostly eats other predators because N15 atoms are more likely to be incorporated into the tissues of consumers. So each trophic level increases the proportion of N15. 
+* __Carbon ratios:__ Predators that eat animals that rely on different primary producers (such as C3 vs C4 plants on land or different groups of marine plants and algae) will have different ratios of C13 to C12.
+
+Gorman et al. (2014) were interested in:
+
+1. how much different penguin species show sexual dimorphism (differences in body size), and
+2. whether greater sexual dimorphism would lead male and female penguins to show greater differences in their trophic niches (e.i. differences in the prey species that they hunt and eat), especially in years with lower prey availability
+
+So let's start by making the variable/column names a little easier to work with, using a library called [janitor](https://www.rdocumentation.org/packages/janitor/versions/2.1.0) and a function called clean_names that will convert all column names to snake_case:
+
+```{r}
+library(janitor)
+
+cleaned_penguins <- clean_names(penguins_raw)
+
+glimpse(cleaned_penguins)
+```
+
+Last, before we get to plotting, let's use a dplyr function to remove all individuals where we don't have information about their sex. Those data could be useful for answering many questions, but not these particular questions. We'll also add one more variable: year. The authors thought that prey availability would likely vary across years due to differences in the size the ice sheets and thus affect penguins' trophic niches.
+
+```{r}
+cleaned_penguins <- cleaned_penguins %>%
+  filter(!is.na(sex)) %>%
+  mutate(year = substr(date_egg, start = 1, stop = 4))
+```
+
+
+## Section 2: Creating your own plots to explore trends (7 points)
+
+1. Generate a set of plots that show how much sexual dimorphism there is in the four measurements of body size across the three species of penguins
++ sex is a categorical variable and body size measurements are continuous
++ so you'll want something like a density plot or boxplot to compare distributions (refer to the R for Data Science section 2.5.1)
++ facet_wrap() can be useful for viewing trends for different species (refer to the R for Data Science section 2.5.4)
++ here you don't need to format the axis or legend labels (unless you want to)
+
+```{r}
+library(ggplot2)
+theme_set(theme_classic())
+```
+
+
+**Variable: culmen_length_mm**
+
+```{r}
+cleaned_penguins %>%
+  ggplot(aes(x = sex, y = culmen_length_mm)) +
+  geom_boxplot() +
+  facet_wrap(~species)
+```
+
+**Variable: culmen_depth_mm**
+
+```{r}
+cleaned_penguins %>%
+  ggplot(aes(x = sex, y = culmen_depth_mm)) +
+  geom_boxplot() +
+  facet_wrap(~species)
+```
+
+**Variable: flipper_length_mm**
+
+```{r}
+cleaned_penguins %>%
+  ggplot(aes(x = sex, y = flipper_length_mm)) +
+  geom_boxplot() +
+  facet_wrap(~species)
+```
+
+**Variable: body_mass_g**
+
+```{r}
+cleaned_penguins %>%
+  ggplot(aes(x = sex, y = body_mass_g)) +
+  geom_boxplot() +
+  facet_wrap(~species)
+```
+
+
+2. Generate another set of plots to show how much males and females differ in the two measurements of trophic niche (N and C ratios) across the three species
++ I would recommend first making density/boxplots (refer to the R for Data Science section 2.5.1)
++ then you can make scatterplots of C vs N ratios (refer to the R for Data Science section 2.2.4)
++ in this case, year may be important because trophic niches tend to shift depending on food availability
++ I would recommend separating years and species, and facet_grid(year~species) is one good way to accomplish that
++ here you don't need to format the axis or legend labels (unless you want to)
+
+**Variable: delta_15_n_o_oo**
+
+```{r}
+# deriving the year from the date_egg variable
+cleaned_penguins <- cleaned_penguins %>%
+  mutate(year = substr(date_egg, 1, 4))
+
+# box plots faceted by year and species
+cleaned_penguins %>%
+  ggplot(aes(x = sex, y = delta_15_n_o_oo)) +
+  geom_boxplot() +
+  facet_grid(year~species)
+```
+
+**Variable: delta_13_c_o_oo**
+
+```{r}
+# box plots faceted by year and species
+cleaned_penguins %>%
+  ggplot(aes(x = sex, y = delta_13_c_o_oo)) +
+  geom_boxplot() +
+  facet_grid(year~species)
+```
+
+**Scatter Plots: delta_15_n_o_oo vs. delta_13_c_o_oo**
+
+```{r}
+# scatter plots faceted by year and species
+cleaned_penguins %>%
+  ggplot(aes(x = delta_15_n_o_oo, y = delta_13_c_o_oo)) +
+  geom_point() +
+  facet_grid(year~species)
+
+# scatter plots faceted by sex and year (species is distinguished by color)
+cleaned_penguins %>%
+  ggplot(aes(x = delta_15_n_o_oo, y = delta_13_c_o_oo, color = species)) +
+  geom_point() +
+  facet_grid(year~sex)
+```
+
+
+## Section 3: Interpreting the plots (4 points)
+
+Based on these plots:
+
+3. Does there seems to be evidence of sexual dimorphism? If so, does the amount of sexual dimorphism vary across penguin species?  
+Yes, there seems to be sexual dimorphism. Body part measurements are overall larger for males than for females. Chinstrap penguins have a particularly large difference in male and female culmen lengths, while Gentoo penguins have especially pronounced sexual dimorphism in body masses.
+
+
+4. Do species with more sexual dimorphism also seem to show differences in trophic niche between females and males (at least in some years)?  
+It doesn't seem that there are differences in trophic niche between males and females, regardless of year. The box plots I generated for isotope ratios did not show significant differences between males and females for any species in any year. This is supported by the scatter plots I generated: the species clusters for males and females appear in the same locations on the nitrogen-carbon axis for all years.
+
+
+Part V was cut from this homework assignment.
+
+---
+
+# Part V: Coastal sage scrub restoration experimental data
+
+## Section 1: Data Source (4 points)
+
+McGuire, K. D., Schmidt, K. T., Ta, P., Long, J. J., Yurko, M., & Kimball, S. (2022). Is it best to add native shrubs to a coastal sage scrub restoration project as seeds or as seedlings?. Plos one, 17(2), e0262410.
+
+Coastal sage scrub habitats only occur in Southern California and Mexico. They include low-growing, drought-resistant, deciduous shrubs adapted to a semi-arid Mediterranean climate, and many of them, like sages, are aromatic (when you break the leaves or stems they release volatile compounds with a strong smell). Restoration efforts can be costly, and they often involve adding native plants that must compete with non-native plants.
+
+This study aimed to determine whether restoring sage scrub habitats by planting seeds (cheaper) or growing plants in a greenhouse and then transplanting them into the ground (more expensive) would result in greater native plant:
+
+* % coverage
+* density
+* species richness
+* growth
+* survival
+
+Next week we will learn about ways to clean and quickly summarize data into forms that we can analyze and plot. This week, I have done that step for you and created two comma separated value (csv) files:
+
+* treatment_data_summary.csv
+  + summarized by whether the shrubs were seeded or planted (treatment)
+  + means and standard errors for 4 variables
+* shrub_species_summary.csv
+  + summarized by shrub species and treatment
+  + means, standard errors, and sample sizes for 8 variables
+
+So let's read in the treatment data set first:
+
+```{r}
+treatment_df <- read.csv("data/treatment_data_summary.csv")
+```
+
+Now you can practice reading in some data. The shrub_species_summary.csv file is also in a folder called data inside this repository so all you need to change from the line above is the name of the data frame (choose a name that makes sense to you) and the specific file name:
+
+```{r}
+TODO
+```
+
+Now use the glimpse function to look at the variables in each data frame:
+
+```{r}
+TODO
+```
+
+```{r}
+TODO
+```
+
+
+## Section 2: Recreating Figure 2 (8 points)
+
+Your next task is to look at Figure 2 from the McGuire et al. (2022) paper, which I've provided for you as a McGuire_etal_2022_Figure_2.png in the figures folder in this repository and you can find the official version at this [link](https://journals.plos.org/plosone/article/figure?id=10.1371/journal.pone.0262410.g002).
+
+Answer the following questions:
+
+1. What type of plots are these?
+
+2. What type of variable (quantitative: discrete/continuous or categorical: ordinal/nominal) is shown on the x axis?
+
+3. What types of variables are shown on the y axis?
+
+4. What other aesthetics (color, fill, shape, transparency, etc.) did they use to make their point clearer?
+
+5. What do you think is the main trend highlighted in this figure?
+
+Now pick two of the plots in Figure 2 (A-D) and recreate them. Do not worry about little differences in formatting, but I would like you to create the same type of plot with the same axes labels and include error bars. Remember that you can add error bars to a plot using:
+
+geom_errorbars(aes(ymin = *Y_var* - *SE_var*, ymax = *Y_var* + *SE_var*), width = *desired_width*)
+
+(See Part III: Sections 1 and 3 in the in-class activity)
+
+Plot 1
+
+```{r}
+TODO
+```
+
+Plot 2
+
+```{r}
+TODO
+```
+
+
+## Section 3: Recreating Figure 3 (8 points)
+
+Next look look at Figure 3 from the McGuire et al. (2022) paper, which I've provided for you as a McGuire_etal_2022_Figure_3.png in the figures folder in this repository and you can find the official version at this [link](https://journals.plos.org/plosone/article/figure?id=10.1371/journal.pone.0262410.g003).
+
+Answer the following questions:
+
+6. What type of plots are these?
+
+7. What type of variable (quantitative: discrete/continuous or categorical: ordinal/nominal) is shown on the x axis?
+
+8. What types of variables are shown on the y axis?
+
+9. What other aesthetics (color, fill, shape, transparency, etc.) did they use to make their point clearer?
+
+Now pick two of the plots in Figure 4 (A-H) and recreate them. Do not worry about little differences in formatting, but I would like you to create the same type of plot with the same axes labels and include error bars. Remember to add a group aesthetic mapping!
+
+(See Part III: Sections 2 and 3 in the in-class activity)
+
+Plot 1
+
+```{r}
+TODO
+```
+
+10. Based on this plot, do the shrub species seem to show similar trends or do the trends vary greatly from species to species? If they are similar, what is the overall trend (is seeded better or is planted better)?
+
+
+Plot 2
+
+```{r}
+TODO
+```
+
+11. Based on this plot, do the shrub species seem to show similar trends or do the trends vary greatly from species to species? If they are similar, what is the overall trend (is seeded better or is planted better)?
+
+
+## Section 4: Synthesizing the results (4 points)
+
+12. Imagine you are advising land managers on how to restore coastal sage shrub habitat on their land. Based on these results, what would you tell them about the benefits of seeding native shrubs versus growing and transplanting native shrubs if:
+
+a) They don't care about exactly which species grow in the habitat and just want to get a relatively dense coverage of diverse native shrubs as cheaply as possible.
+
+
+b) They are especially concerned about having a subset of shrub species that will provide food to native specialist pollinators.

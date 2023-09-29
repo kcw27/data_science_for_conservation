@@ -1,0 +1,341 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# File metadata
+
+Template author: Morgan Carr-Markell  
+Template last modified on: Jan 24th, 2023  
+Notebook modified by: Katie Wang
+Notebook last modified on: Jan 26th, 2023
+
+
+# Data source:
+
+Catenazzi, A., Lehr, E., Rodriguez, L.O., Vredenburg, V.T. (2011) _Batrachochytrium dendrobatidis_ and the collapse of anuran species richness and abundance in the upper Manu National Park, Southeastern Peru. _Conservation Biology, 25_(2), 382-391.
+
+
+# Section II: Independent work (35 points)
+
+At this point, feel free to ask me questions or discuss general topics, but you should not work with other students on any of the details of your code in the next sections.
+
+
+First, let's recreate our test data frame:
+
+```{r}
+family <- rep("bufonidae", times = 10)
+
+genus <- c("Atelopus",
+          "Atelopus",
+          "Rhinella",
+          "Rhinella",
+          "Rhinella",
+          "Rhinella",
+          "Rhinella",
+          "Rhinella",
+          "Rhinella",
+          "Rhinella"
+          )
+
+species <- c("erythropus",
+            "erythropus",
+            "inca",
+            "inca",
+            "leptoscelis",
+            "leptoscelis",
+            "manu",
+            "manu",
+            "margaritifer",
+            "margaritifer"
+            )
+
+year <- rep(
+          x = c("1999", "2008_2009"), 
+          times = 5
+          )
+
+abundance <- c(5,
+              0,
+              0,
+              14,
+              32,
+              3,
+              0,
+              16,
+              15,
+              0
+              )
+
+bufonidae <- data.frame(
+                      family,
+                      genus,
+                      species,
+                      year,
+                      abundance
+                      )
+```
+
+
+## Part 10: Functions
+
+After finishing the in-class activity, we're almost ready to write our own custom functions. In R, you define functions by starting with the function name, using the assignment arrow, and then using a function which is actually called "function". Here's the basic syntax:
+
+my_function_name <- function(parameter1, parameter2){  
+  commands to run  
+  return(output)  
+}
+
+Let's look at a more practical example:
+
+```{r}
+power_function <- function(base, power){
+  # takes in a base and power to raise it to and returns the result
+  output <- base^power
+  return(output)
+}
+```
+
+After running this, you'll notice that your function is now listed as an object in the environment tab. Let's try using it with the arguments 2 (base) and 4 (power):
+
+```{r}
+power_function(2, 4)
+```
+
+Yay! It worked. For more complicated functions, you'll want to test them out with a wider range of possible inputs, but for now we'll move on to talking about named parameters.
+
+If we couldn't remember which order we had typed the two parameters in our function definition, we could use their names when calling the function like this:
+
+```{r}
+power_function(base = 2, power = 4)
+```
+
+
+### 11.1 Abundance categories (10 points)
+
+Let's practice writing functions. We have a data frame, called bufonidae, that contains the abundance (number of individuals observed in each species) of 10 species of Peruvian frogs and toads. Let's say we want to summarize those data into categories:
+
+* "A" for absent, meaning no individuals seen
+* "S" for singleton, meaning only 1 individual seen
+* "R" for rare, meaning 2-10 individuals
+* "C" for common, meaning more than 10 individuals
+
+Write a function that takes one abundance number as input and returns one of those four letters as output, based on the thresholds above. Hint: Use an if, else if, else control structure
+
+```{r}
+get_abundance_category <- function(num){
+  if (num == 0) {
+    return("A")
+  } else if (num == 1) {
+    return("S")
+  } else if (num <= 10) { # don't need to specify >1 because that's already been checked
+    return("R")
+  } else {
+    return("C")
+  }
+}
+```
+
+Now let's test it by adding an abundance_category column to the bufonidae data frame. We'll need one new function to do this called sapply(), which will allow us to apply the function we just wrote to every value in one column of the data frame and return a vector:
+
+```{r}
+bufonidae$abundance_category <- sapply(X = bufonidae$abundance, FUN = get_abundance_category)
+```
+
+Next let's tell R what order we want our categories in:
+
+```{r}
+bufonidae$abundance_category <- factor(bufonidae$abundance_category, levels = c("A", "S", "R", "C"))
+```
+
+Now let's make a contingency table of the results by year using the table() function:
+
+```{r}
+table(x = bufonidae$year, y = bufonidae$abundance_category)
+```
+
+Just looking at 5 species in 1 family isn't very informative for assessing biodiversity trends, but it helped us to test out our code. Now we can apply our function to a larger data set.
+
+Let's use this small data set to also test out calculating alpha diversity and the Shannon-Weiner Diversity Index (that incorporates evenness). 
+
+### 11.2 Alpha diversity (10 points)
+
+To get alpha diversity over time, we can:
+
+  1. Add an "observed" column that has a TRUE in every row where the abundance was greater than 0 and false in every row where the abundance was 0
+  2. Extract the values from the new "observed" column that correspond to a particular year
+  3. Add all those values up using the sum() function (which works because TRUE evaluates to 1 and FALSE evaluates to 0)
+  4. Store the values for each year and recombine them to plot the trend
+
+So let's write a function to do that:
+
+```{r}
+get_alpha_diversity <- function(survey_data, year_of_interest){
+  # Add 'observed' column using a logical expression
+  survey_data$observed <- survey_data$abundance > 0 
+  
+  # Extract the values for the new observed column that correspond to the year_of_interest
+  values <- survey_data[survey_data$year == year_of_interest, "observed"] # [row(s), columns(s)]
+  
+  # add all of those values using the sum() function
+  output <- sum(values)
+  
+  # return the output using return()
+  return(output)
+}
+```
+
+Let's test it on the bufonidae data frame and use the year '1999' (remember in this case the year is a character string!):
+
+```{r}
+get_alpha_diversity(survey_data = bufonidae, year_of_interest = "1999")
+```
+
+### 11.2 Shannon-Weiner Diversity (10 points)
+
+Now that we have a function for alpha diversity, Shannon-Weiner Diversity should be quite similar. The only steps that are different are the first and last steps. 
+  1. a) Instead of adding an observed column of TRUE and FALSE, we need to calculate a "proportion", which is
+  $pi = ni/N$
+  (proportion = taxon abundance / total abundance)
+  1. b) and then a "corrected_abundance" column for this part of the Shannon-Weiner equation:
+$(pi)*nl(pi)$
+(proportion) * natural log of (proportion)
+  2. In the last step we still sum the values, but we also need to multiply by -1
+
+Again, I'll provide a scaffold and little bit of starter code (although feel free to try out other approaches). Just remember to add comments (with #) if you use a different approach.
+
+```{r}
+get_shannon_diversity <- function(survey_data, year_of_interest){
+  # First extract only rows where the abundance is greater than 0 and the year is correct
+  survey_data <- survey_data[survey_data$abundance > 0 & survey_data$year == year_of_interest, ]
+  
+  # Get the total abundance of all taxa (sum of the abundance column)
+  total_abundance <- sum(survey_data$abundance)
+  
+  # Add a 'proportion' column using the formula (proportion = taxon abundance / total abundance)
+  survey_data$proportion <- survey_data$abundance / total_abundance
+  
+  # Add 'corrected_abundance' column using the formula above, note: natural log is log() in R
+  survey_data$corrected_abundance <- (survey_data$proportion) * log(survey_data$proportion)
+  
+  # add all of those corrected_abundance values using the sum() function and multiply by -1
+  output <- sum(survey_data$corrected_abundance) * -1
+
+  # return the output using return()
+  return(output)
+}
+```
+
+Again, let's test it on the bufonidae data frame and use the year 1999:
+
+```{r}
+get_shannon_diversity(survey_data = bufonidae, year_of_interest = "1999")
+```
+
+
+## Part 11: Investigating changes in Peruvian frog/toad species diversity over time (5 points)
+
+Now we're ready to apply our functions to a much larger data set, which is based on real data on frogs and toads surveyed in the Peruvian Andes (Catenazzi et al. 2011). 
+
+First, we need to make sure our working directory is correct. The easiest way to do that in RStudio is to click on Session>Set Working Directory>To Source File Location. If you know the path to your source file directory, you can also use setwd("source_file_path") and substitute in the correct path.
+
+Once that's done, we'll use the read.csv() function to read the data into a data frame:
+
+```{r}
+anurans_df <- read.csv("data/catenazzi_etal_2011_amphibian_survey.csv")
+```
+
+Check that anurans_df appears in the environment tab. You can click on the light blue table icon in the environment tab to view it as a spreadsheet, but let's use the str() function to see the structure as well:
+
+```{r}
+# Use the str() function here
+str(anurans_df)
+```
+Notice that this is very similar to the bufonidae data frame, except now we have 96 observations instead of 10.
+
+R has a very useful built-in function called unique that can help determine how many families, genera, and species we have recorded in our data set:
+
+```{r}
+# Number of families
+unique_families <- unique(anurans_df$family)
+length(unique_families)
+```
+
+Try it out for genera and species below:
+
+```{r}
+# Number of genera
+unique_genera <- unique(anurans_df$genus)
+length(unique_genera)
+
+# Number of species (assuming no genera have species with the same species names)
+unique_species <- unique(anurans_df$species)
+length(unique_species)
+```
+
+Now let's apply your get_abundance_category() function and tell R what we want the levels to be so we can make a table of abundances across the two sets of survey years:
+
+```{r}
+# applying the get_abundance_category function
+anurans_df$abundance_category <- sapply(X = anurans_df$abundance, FUN = get_abundance_category)
+# Note: in sapply(), FUN = my_func, not my_func() or "my_func"
+
+# setting the levels
+anurans_df$abundance_category <- factor(anurans_df$abundance_category, levels = c("A", "S", "R", "C"))
+
+# make a contingency table using the year column and the abundance_category column from anurans_df
+cat_table <- table(anurans_df$year, anurans_df$abundance_category)
+```
+
+Now I'm going to fill in some code so you can roughly visualize the results. You may need to run install.packages("ggplot2") in the Console if you haven't used ggplot before. We will be learning much more about ggplot next week.
+
+```{r}
+# make the contingency table into a data frame
+cat_table <- data.frame(cat_table)
+
+# give the new data frame useful column names
+colnames(cat_table) <- c("year", "abundance_category", "frequency")
+
+# load a library for plotting
+library(ggplot2)
+
+# plot the frequencies over time
+ggplot(data = cat_table, mapping = aes(x = year, y = frequency, fill = abundance_category)) +
+  geom_col(position = "stack")
+```
+
+
+Now let's look at alpha diversity and Shannon-Weiner Diversity over time. I'll fill in some code to create a small data frame of years and the apply the function to each year and the anurans_df data frame.
+
+```{r}
+# Creating a data frame of years
+diversity_df <- data.frame(year = c("1999", "2008_2009"))
+
+# Applying the get_alpha_diversity function to create a new column
+diversity_df$alpha <- sapply(X = diversity_df$year, FUN = get_alpha_diversity, survey_data = anurans_df)
+
+# Applying the get_shannon_diversity to create a new column
+diversity_df$shannon <- sapply(X = diversity_df$year, FUN = get_shannon_diversity, survey_data = anurans_df)
+```
+
+Finally, let's visualize the results and see how they compare to the plot of frequency categories.
+
+```{r}
+# Alpha diversity
+ggplot(data = diversity_df, mapping = aes(x = year, y = alpha)) +
+  geom_col()
+```
+
+```{r}
+# Shannon-Weiner Diversity Index
+ggplot(data = diversity_df, mapping = aes(x = year, y = shannon)) +
+  geom_col()
+```
+
+Question: Do you see a clear difference in biodiversity over time? Do any of the three ways of looking at diversity seem to show a stronger change? Why do you think that might be?  
+
+*I would say that the plot of abundance categories shows that the biodiversity has changed over time, while the alpha and Shannon-Weiner diversity do not provide a clear answer to the question. Looking at the abundance categories, it's visually apparent that the number of absent species increased, and this was accompanied by a decrease in the number of rare and singleton species. This is a conclusion that makes logical sense. When looking at the plots for alpha and Shannon-Weiner diversity, however, you can see that there's a drop in diversity, but it's unclear whether this is a significant difference or not because the drop in the diversity index is small relative to the magnitude of the diversity indices.*  
+
+Great job! You've written 3 functions in R to look at biodiversity in three different ways. Save your files, commit your changes, and push them to the online GitHub repository. Then you're done!
+
+Next week we will learn how to make much prettier plots than these to investigate trends in data.

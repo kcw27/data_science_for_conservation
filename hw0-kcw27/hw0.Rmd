@@ -1,0 +1,18 @@
+---
+title: "hw0"
+author: "Morgan Carr-Markell"
+date: "2023-01-13"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Hello World!
+
+```{r}
+print("Hello World!")
+```

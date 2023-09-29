@@ -1,0 +1,569 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## File metadata
+
+Template author: Morgan Carr-Markell  
+Template last modified on: Feb 21, 2023  
+Notebook modified by: Katie Wang  
+Notebook last modified on: Feb 22, 2023 
+
+
+## Code Source
+
+Today we are going to learn a bit about the sf library and the rgbif library. The code below is a modified version of part of Dr. Luis D. Verde Arregoitia's R script, which he shared in an online post entitled, "Species richness analysis with R and sf." You can find his full original code and his comments about it here: <https://luisdva.github.io/rstats/richness/>
+
+Here is a link to the license on GitHub for his website: <https://github.com/luisDVA/luisdva.github.io/blob/master/LICENSE>
+
+
+## Libraries
+
+```{r, messages=FALSE}
+library(sf)  # simple features, vector mapping package
+library(dplyr)
+library(tidyverse)  # I added this
+library(ggplot2)
+library(scico)  # contains color/fill palettes for plotting
+library(rnaturalearth)  # Natural Earth functions (ex. ne_countires)
+library(rnaturalearthdata)  # vector data from Natural Earth
+library(rgbif)
+```
+
+----
+
+## Part 1: Natural Earth
+
+### 1.1 Getting to know the source
+
+Natural Earth is a project to provide free vector and raster data useful in making all sorts of maps.
+
+Here are the terms of use: <https://www.naturalearthdata.com/about/terms-of-use/>
+
+1. What kind of license do these data have?  
+The data have a public domain Creative Commons license. They are free to use for any purpose without credit.
+
+
+### 1.2 Available features
+
+Check out the page about Natural Earth features: <https://www.naturalearthdata.com/features/>
+
+1. Scroll down to the "Data availability key". What do the numbers 10, 50, 110 mean?  
+10 means most detailed, 50 means moderately detailed, and 110 means coarse detail.
+
+2. What is an example of an available Cultural Vector Data Theme?  
+Populated places is a Cultural Vector Data Theme.
+
+3. What is an example of an available Physical Vector Data Theme?  
+Land is a Physical Vector Data Theme.
+
+4. What is an example of an available Raster Data Theme?  
+Ocean Bottom is a Raster Data Theme.
+
+
+### 1.3 Cultural Data Theme: Countries
+
+In the Console, run the following command to pull up the documentation about the rnaturalearth ne_countries() function:
+
+?rnaturalearth::ne_countries
+
+1. What does ne_countries() do?  
+ne_countries() returnes polygons for world countries. For tiny_countries, it returns points instead.
+
+
+Now let's us it:
+
+```{r}
+worldMap <- ne_countries(scale = "medium", type = "countries", returnclass = "sf")
+```
+
+Just to check that we did this correctly, let's add three things to the code:
+
+* First, let's investigate its structure by printing the first 3 rows:
+
+```{r}
+worldMap[1:3, ]
+```
+
+2. What is the geometry type of worldMap (look at the top)? Why does that type make sense to represent countries?  
+The geometry type is multipolygon, which makes sense for an area representation of countries. Countries aren't necessarily single continuous landmasses, so they may need multiple polygons to represent them.
+
+3. In the coordinate reference system (CRS), what is the datum?  
+The datum is WGS84.
+
+4. What column contains country names?  
+The sovereignt column can be used for country names.
+
+5. What is the name of the column that stores the points that define the boundaries of each country (hint: it's the last column)?  
+The geometry column stores the points that define the country's boundaries.
+
+* Second, let's use ggplot2 to map the countries, using the fill aesthetic to show one attribute:
+
+```{r}
+ggplot(data = worldMap, aes(fill = sovereignt)) +
+  geom_sf(show.legend = F)
+```
+
+Here we see a new type of geom. We've worked with geom_point, geom_line, geom_boxplot, etc. This geom_sf is for mapping simple feature (sf) objects.
+
+
+### 1.4 Adding other layers
+
+You'll notice that lakes (such as the Great Lakes) are missing from these country borders. Let's learn how to add them.
+
+rnaturalearth has countries (ne_countries function), states (ne_states function), and coastlines (ne_coastlines function) pre-loaded. All other Natural Earth features can be downloaded using the ne_download() function.
+
+```{r}
+# Code below modified from: 
+# https://cran.r-project.org/web/packages/rnaturalearth/vignettes/rnaturalearth.html
+lakes110 <- ne_download(scale = 110, 
+                        type = "lakes", 
+                        category = "physical",
+                        returnclass = "sf")
+```
+
+Notice the 4 parameters to this function:
+
+* scale (10, 50, or 110 OR "small", "medium", or "large")
+* type (see ?rnaturalearth::ne_download for the full list)
+* category ("cultural", "physical", "raster")
+* returnclass ("sp" or "sf")
+
+*Note:* If you want to learn about all parameters, use ?rnaturalearth::ne_download in the Console
+
+Now we can make a map with that additional layer:
+
+```{r}
+ggplot(data = worldMap, aes(fill = sovereignt)) +
+  geom_sf(show.legend = F) +
+  geom_sf(data = lakes110, fill = "blue")
+```
+
+*Note:* The second geom_sf function call displays a different set of data than the first call so we needed to specify that data parameter locally there.
+
+1. Try downloading and adding another layer to the map above. Use ?rnaturalearth::ne_download and scroll down for a list of features you can map.
+
+```{r}
+glaciated <- ne_download(scale = "small", 
+                        type = "glaciated_areas", 
+                        category = "physical",
+                        returnclass = "sf")
+
+ggplot(data = worldMap, aes(fill = sovereignt)) +
+  geom_sf(show.legend = F) +
+  geom_sf(data = lakes110, fill = "blue") +
+  geom_sf(data = glaciated, fill = "pink")
+```
+
+
+### 1.5 Subsetting to get one or a few countries
+
+#### 1.5.1 Costa Rica
+
+sf objects like worldMap are nice to work with because most dplyr functions like filter() and select() are compatible with them. Here's an example of using filter to extract the polygon for Costa Rica:
+
+```{r}
+CRpoly <- worldMap %>% 
+  filter(sovereignt == "Costa Rica")
+
+# Let's add this plot to check that it worked:
+ggplot(data = worldMap) +
+  geom_sf() +
+  geom_sf(data = CRpoly, fill = "red")
+```
+
+
+#### 1.5.2 Neighboring countries
+
+If we also want to display neighboring countries in a different color, we can extract them as well. There are multiple ways to do this. I ran into some problems with coordinate systems when using Dr. Verde Arregoitia's code, probably due to an update to the packages. Below is a different approach that works with the current versions. We use:
+
+* [which](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/which), a base R function that allows you to get the indices of an array or data frame where a logical statement is true 
+* [slice](https://www.rdocumentation.org/packages/sf/versions/1.0-8/topics/st_bbox), a dplyr function that "lets you index rows by their (integer) locations"
+ 
+So the second line below gets the indices of Nicaragua and Panama to slice those from worldMap.
+
+```{r}
+indices <- which(worldMap$sovereignt == "Nicaragua" | worldMap$sovereignt == "Panama")
+neighbours <- worldMap %>% 
+  slice(indices)
+
+# Let's check our work:
+neighbours$sovereignt
+```
+
+
+### 1.6 Formatting our map using ggplot2
+
+#### 1.6.1 Getting bounding coordinates
+
+First, let's decide what reasonable edges should be for a map of Costa Rica. Dr. Verde Arregoitia solved this problem programmatically by first using st_buffer() to get a buffer that extends a certain distance around Costa Rica (dist is either in degrees or units, depending on the coordinate reference system) and then using st_bbox() to get coordinates of a bounding box around that buffer.
+
+```{r}
+limsCR <- st_buffer(CRpoly, dist = 0.7) %>% 
+  st_bbox()
+
+# I added this line so we can see the coordinates
+limsCR
+```
+
+
+#### 1.6.2 Drawing a nicely-formatted map
+
+I only modified this map slightly from the code on the website to not specify x breaks. The code below:
+
+* adds the neighboring countries in white
+* adds Costa Rica with no color (we'll add colors later)
+* crops the map to the bounds we just determined
+* modifies the theme of the plot by changing background colors and getting rid of grid lines (using panel.grid, line, and rect = elementblank())
+
+```{r}
+ggplot() +
+  geom_sf(data = neighbours, fill = "white") +
+  geom_sf(data = CRpoly) +
+  coord_sf(
+    xlim = c(limsCR["xmin"], limsCR["xmax"]),
+    ylim = c(limsCR["ymin"], limsCR["ymax"])
+  ) +
+  theme(
+    plot.background = element_rect(fill = "#f1f2f3"),
+    panel.background = element_rect(fill = "#2F4051"),
+    panel.grid = element_blank(),
+    line = element_blank(),
+    rect = element_blank()
+  )
+```
+
+1. Try commenting out different lines to see what happens to the resulting map:
+
+```{r}
+# Code to modify:
+ggplot() +
+  geom_sf(data = neighbours, fill = "white") +
+  geom_sf(data = CRpoly) +
+  #coord_sf(
+  #  xlim = c(limsCR["xmin"], limsCR["xmax"]),
+  #  ylim = c(limsCR["ymin"], limsCR["ymax"])
+  #) +
+  theme(
+    plot.background = element_rect(fill = "#f1f2f3"),
+    #panel.background = element_rect(fill = "#2F4051"),
+    panel.grid = element_blank(),
+    line = element_blank(),
+    #rect = element_blank()
+  )
+```
+
+
+----
+
+## Part 2: Global Biodiversity Information Facility (GBIF)
+
+In his online post, Dr. Verde Arregoitia starts by simulating some species occurrence points for different species using the st_sample() function. If you want to learn more about that, feel free to look at his code, but for now we're going to focus on the case study he presents using real occurrence data. He is interested in mammal diversity and conservation, so it makes sense that he chose to focus on bats.
+
+### 2.1 Getting species occurrence data from GBIF using the rgbif package
+
+Before we get into the bat case study, we should learn a little more about the source of the bat occurrence data and how to access similar data using the rgbif package.
+
+First, look at the about page for GBIF <https://www.gbif.org/what-is-gbif>
+
+1. What is the purpose of GBIF?  
+GBIF provides open access to data about all life on Earth.
+
+Now, let's look at the types of available data at this site <https://www.gbif.org/dataset-classes>
+
+2. What are the four types of available data from GBIF?  
+The four classes of datasets on GBIF are resources metadata, checklist data, occurrence data, and sampling-event data.
+
+
+Next, click on the "Browse Occurrence Datasets" link.
+
+3. What are two of the occurrence data sets available? What do they focus on?  
+One is EOD – eBird Observation Dataset, which has biodiversity data about birds, gathered through a citizen science approach. Another is Artportalen (Swedish Species Observation System), which focuses on observations of Sweden's plants, animals, and fungi.
+
+
+rgbif is a package that interfaces with the GBIF application programming interface (API). Many online databases have an API like that allows programs to download their data. It makes it easy to repeat the same analysis as the database is updated with new records or corrections to old records.
+
+Read the "Introduction to rgbif" vignette here <https://docs.ropensci.org/rgbif/articles/rgbif.html>
+
+1. What do the occ_search() and occ_download() functions do and how are they different from each other?  
+Both functions retrieve occurrence data from GBIF. occ_search() is a fast version of occ_download() that has a limit on records per query and does not require a GBIF account to use.
+
+
+### 2.2 Bat case study
+
+OK, now that we have some sense of the data source and r package to access it, let's get into the bat case study.
+
+#### 2.2.1 Searching for bat occurrence records
+
+[Chiroptera](https://en.wikipedia.org/wiki/Bat) is the order that contains all bats, and name_suggest() helps us get taxon ID keys to use in our search. I've modified the code a little to illustrate this:
+
+```{r}
+bat_id_no <- name_suggest(q = "chiroptera", rank = "order")
+
+# Let's look at the data frame before extracting the taxon ID key
+bat_id_no
+```
+
+And we'll look at its structure
+
+```{r}
+str(bat_id_no)
+```
+
+Now we'll get just the key number, using select() and the tidyverse pluck() function, which allows us to extract vectors or values from a data frame
+
+```{r}
+bat_id_no <- bat_id_no$data %>%
+  select(key) %>%
+  pluck(1)
+
+bat_id_no
+```
+
+1. Try using name_suggest() to get the taxon key numbers of some other order or family or genus that is of interest to you.
+
+```{r}
+mole_id_no <- name_suggest(q = "talpidae", rank = "family")
+
+mole_id_no <- mole_id_no$data %>%
+  select(key) %>%
+  pluck(1)
+
+mole_id_no
+```
+
+At this point, we can use occ_search. We won't use occ_download right now as occ_download requires signing up for a [GBIF account](https://www.gbif.org/).
+
+*Note:* Running the function below may take a minute because it has to communicate with the online database.
+
+```{r}
+CRbatsout <- occ_search(
+  orderKey = bat_id_no, 
+  country = "CR",
+  basisOfRecord = "PRESERVED_SPECIMEN", 
+  limit = 3000
+)$data
+```
+
+You'll notice here that we used the taxon key that we just found with names_suggest(), and the search was limited to a particular country (see country codes [here](https://www.iso.org/obp/ui/#search)), a particular type of record, and a limit on the number of records to make the search faster. 
+
+You can find many more possible search parameters at this [website](https://search.r-project.org/CRAN/refmans/rgbif/html/occ_search.html).
+
+Let's look at those data:
+
+```{r}
+glimpse(CRbatsout)
+```
+That's a lot of columns!
+
+1. Why do you think there are so many NA values in these first rows?  
+Since GBIF collects data from a vast pool of scientific publications, it could be the case that some authors collected some kinds of data but not others for their own research.
+
+
+
+
+### 2.3 Processing the occurrence records
+
+#### 2.3.1 Data cleaning
+
+First, we need to get rid of all records without location information because we can't map those. If we were doing a different analysis, we might want to keep the other attribute columns, but since we are just mapping them, we will omit all columns that do not indicate species or spatial coordinates.
+
+```{r}
+CRbatsXY <- CRbatsout %>%
+  select(species, decimalLongitude, decimalLatitude) %>%
+  na.omit()
+```
+
+
+#### 2.3.2 Making the occurrence data frame into an sf object
+
+Here we use the st_as_sf() function, and we must specify which columns contain the x and y coordinates and what coordinate reference system they are defined in.
+
+Here are some other [CRS codes in R](https://www.nceas.ucsb.edu/sites/default/files/2020-04/OverviewCoordinateReferenceSystems.pdf)
+
+WGS84 (EPSG: 4326) is commonly used by organizations that provide GIS data for the entire globe or many countries. It's the CRS used by Google Earth.
+
+```{r}
+CRbatsXYsf <- st_as_sf(CRbatsXY, 
+                       coords = c("decimalLongitude", "decimalLatitude"), 
+                       crs = 4326)
+```
+
+1. What do you think would happen if we switched "decimalLongitude" and "decimalLatitude" here?  
+The coordinates would be backwards- the latitude would be listed first, and the longitude second. That would cause issues when plotting on a map.
+
+
+Let's look at the geometry column (we'll just print the first 3 rows):
+
+```{r}
+CRbatsXYsf[1:3,]
+```
+
+2. What is the type of the values in the geometry column?  
+They are of the POINT type. They're coordinate points.
+
+
+#### 2.3.4 Summarizing occurrence points by species
+
+It's convenient that we can use the group_by() and summarize() functions to convert individual points to collections of points. 
+
+```{r}
+CRbatsXYsf <- CRbatsXYsf %>%
+  group_by(species) %>%
+  summarize()
+```
+
+Now let's look again:
+
+```{r}
+CRbatsXYsf[1:3,]
+```
+
+The type of the geometry column has changed because each value now represents a collection of all the occurrence points for that species.
+
+
+### 2.4 Plotting processed occurrence data
+
+Now we can plot the points with different colors for different species.
+
+```{r}
+batPointsPlot <-
+  ggplot() +
+  geom_sf(data = neighbours, color = "white") +
+  geom_sf(data = CRpoly) +
+  geom_sf(data = CRbatsXYsf, aes(color = species), pch = 21, show.legend = F) +
+  coord_sf(
+    xlim = c(limsCR["xmin"], limsCR["xmax"]),
+    ylim = c(limsCR["ymin"], limsCR["ymax"])
+  ) +
+  theme(
+    plot.background = element_rect(fill = "#f1f2f3"),
+    panel.background = element_rect(fill = "#2F4051"),
+    panel.grid = element_blank(),
+    line = element_blank(),
+    rect = element_blank()
+  )
+batPointsPlot
+```
+
+1. For this exercise, we won't explore the points in great detail, but do any of the point locations surprise you?    
+There are points in the ocean, which is surprising because people are probably not going out on boats to observe bats.
+
+
+### 2.5 Plotting species richness using grid squares
+
+#### 2.5.1 Creating grid squares
+
+First, we use some handy sf functions to make a grid:
+
+* [st_make_grid](https://r-spatial.github.io/sf/reference/st_make_grid.html): creates grid squares of some size across a polygon (default is square but can be hexagonal)
+* [st_intersection](https://r-spatial.github.io/sf/reference/geos_binary_ops.html): outputs the intersection of two spatial objects (which is why CRpoly had to come back in as the 2nd argument)
+* [st_cast](https://www.rdocumentation.org/packages/sf/versions/1.0-8/topics/st_cast): allows you to convert one type of geometry to another, in this case grouping grid squares into a multipolygon
+* [row_number](https://dplyr.tidyverse.org/reference/ranking.html): this gives the row number and is often useful when you need unique values but you don't care what they are exactly
+
+```{r}
+CRGrid <- CRpoly %>%
+  st_make_grid(cellsize = 0.2) %>%
+  st_intersection(CRpoly) %>%
+  st_cast("MULTIPOLYGON") %>%
+  st_sf() %>%
+  mutate(cellid = row_number())
+```
+
+
+#### 2.5.2 Combining grid with species occurrences
+
+Then we:
+
+* use [st_join()](https://r-spatial.github.io/sf/reference/st_join.html) to create a new sf multipolygon object. By default, this is a left join, which returns all records of the first sf object with fields from the second sf object for non-matched records filled with NA values. Therefore, we get at least one row for every grid cell in CRGrid and extra rows for every species from CRbatsXYsf that occurs within each grid cell
+* use mutate() to add an overlap column indicating whether the row represents a grid square with no species in it or the occurrence of one species in a grid square
+* use group_by to group by grid cell
+* summarize species richness for each grid cell (add up the 1s and 0s from overlap)
+
+```{r}
+bat_richness_grid <- CRGrid %>%
+  st_join(CRbatsXYsf) %>%
+  mutate(overlap = ifelse(!is.na(species), 1, 0)) %>%
+  group_by(cellid) %>%
+  summarize(num_species = sum(overlap))
+```
+
+1. The steps above can be a bit tricky to think through without looking at the what happens to the sf data frame at each step. This approach is helpful whenever your trying to understand code with many pipes. Try running each step of this process separately and looking at bat_grid_richness after each step to see how it changes:
+
+a) st_join
+
+```{r}
+bat_richness_grid <- CRGrid %>%
+  st_join(CRbatsXYsf)
+
+View(bat_richness_grid) # keep open and check back after each step
+```
+
+b) mutate
+
+```{r}
+bat_richness_grid <- bat_richness_grid %>%
+  mutate(overlap = ifelse(!is.na(species), 1, 0))
+```
+
+c) group_by and summarize
+
+```{r}
+bat_richness_grid <- bat_richness_grid %>%
+  group_by(cellid) %>%
+  summarize(num_species = sum(overlap))
+```
+
+
+#### 2.5.3 Plotting the species richness
+
+Below you'll notice that we defined data at the global level, which allows us to do things like set the fill aesthetic to num_species and set the color palette for fill below without repeating "data = bat_richness_grid" each time. However, we do need to specify "data = neighbors" and "data = CRpoly" locally within those calls to geom_sf().
+
+```{r}
+ggplot(data = bat_richness_grid) +
+  geom_sf(data = neighbours, color = "white") +
+  geom_sf(data = CRpoly, fill = "grey", size = 0.1) +
+  geom_sf(aes(fill = num_species), color = NA) +
+  scale_fill_scico(palette = "lajolla", end = 0.9, name = "Bat species richness") +
+  coord_sf(
+    xlim = c(limsCR["xmin"], limsCR["xmax"]),
+    ylim = c(limsCR["ymin"], limsCR["ymax"])
+  ) +
+  theme(
+    plot.background = element_rect(fill = "#f1f2f3"),
+    panel.background = element_rect(fill = "#2F4051"),
+    panel.grid = element_blank(),
+    legend.position = "bottom",
+    line = element_blank(),
+    rect = element_blank()
+  ) + 
+  labs(fill = "richness")
+```
+
+
+#### 2.5.4 Optional: Color palettes
+
+If you want, you can try recreating the plot with other color palettes (besides "lajolla"- the original code used reversed "davos") from the scico package. See this [page](https://github.com/thomasp85/scico) to learn about the options.
+
+```{r}
+# Code to modify
+ggplot(data = bat_richness_grid) +
+  geom_sf(data = neighbours, color = "white") +
+  geom_sf(data = CRpoly, fill = "grey", size = 0.1) +
+  geom_sf(aes(fill = num_species), color = NA) +
+  scale_fill_scico(palette = "devon", end = 0.9, name = "Bat species richness") +
+  coord_sf(
+    xlim = c(limsCR["xmin"], limsCR["xmax"]),
+    ylim = c(limsCR["ymin"], limsCR["ymax"])
+  ) +
+  theme(
+    plot.background = element_rect(fill = "#f1f2f3"),
+    panel.background = element_rect(fill = "#2F4051"),
+    panel.grid = element_blank(),
+    legend.position = "bottom",
+    line = element_blank(),
+    rect = element_blank()
+  ) + 
+  labs(fill = "richness")
+```

@@ -1,0 +1,544 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## File metadata
+
+Template author: Morgan Carr-Markell  
+Template last modified on: Fed 7th, 2023  
+Notebook modified by: Katie Wang
+Notebook last modified on: Feb 8th, 2023 
+
+
+## Data set citation:
+
+Bennett, Joanne M. et al. (2019), Data from: GlobTherm, a global database on thermal tolerances for aquatic and terrestrial organisms, Dryad, Dataset, <https://doi.org/10.5061/dryad.1cv08> Downloaded on Dec 26, 2022
+
+
+## Article the data set is from
+
+Bennett, J., Calosi, P., Clusella-Trullas, S. et al. GlobTherm, a global database on thermal tolerances for aquatic and terrestrial organisms. Sci Data 5, 180022 (2018). <https://doi.org/10.1038/sdata.2018.22>
+
+
+## Data set description
+
+The authors of this data set wanted to create something that could be useful for understanding the potential effects of climate change on species' abundances and ranges. All species have some range of temperatures that they have adapted to deal with, and sometimes researchers try to determine what the bounds of those temperature ranges are for different species by exposing individuals in a lab setting to a range of temperatures. This data set is an example of a database created by surveying the literature for studies that all ask a particular question but in different systems (species, habitats, etc.). In this case, the measurements reported are the minimum and maximum threshold temperatures for many different species. We'll see below that researchers tend to use different sorts of thresholds when working with different taxa.
+
+
+### Loading libraries
+
+```{r message=FALSE}
+library(tidyverse)
+```
+
+
+### Reading in data
+
+```{r}
+thermal <- read.csv("data/GlobalTherm_upload_02_11_17.csv")
+```
+
+
+----
+
+### Part 1: Data cleaning/wrangling
+
+Data cleaning usually refers to fixing errors or inconsistencies in the data. You may be tempted to clean the original data file using a spreadsheet program like excel, but it is far better for reproducibility if you do this in R instead and leave the original data file as it is. In that way, you and anyone who uses your code can see what data cleaning steps you did and can fix any errors in those steps.
+
+Data wrangling is anything you need to do to get your data in a form that you can analyze. This process can be challenging, as the name wrangling suggests, but tidyverse functions are there to make the process easier. Let's learn a few of the most useful functions.
+
+First, let's look at the data set:
+
+```{r}
+glimpse(thermal)
+```
+
+You can see right away that they did not use a consistent system to name the columns. Unfortunately, this data set does not have the clearest documentation so it took me some time to figure out what all of the variables/columns here represent. One of the things that I did first was to make a new variable, combining the genus and species names so I could determine whether there were multiple rows for any of the species.
+
+
+#### 1.1: The Pipe (%>%)
+
+To do that, we should first talk about a very useful bit of syntax in R: the pipe (%>%)
+
+Pipes allow you to take an object like a data frame and then perform a series of data manipulations in a way that is easy to read and understand later. Each time you use a pipe, what you are doing is telling R to take the output from the last command and make that into the first argument to the next function. So:
+
+a %>% f(b)
+
+is the same as:
+
+f(a, b)
+
+That piping process allows you to use multiple tidyverse functions one after another to make successive changes to the data structure without needing to write nearly as much code. Here's a simple example, using the mutate function:
+
+```{r}
+thermal <- thermal %>%  
+  mutate(scientific_name = paste(Genus, Species))
+```
+
+Here we have overwritten the original thermal data frame with the output of this pipeline. Note the %>% syntax to pipe the thermal data frame to the next command, which in this case is the mutate function. Mutate creates a new variable/column, which we name and define. You can see that this accomplishes the same things that we did when adding columns to a data frame using base R in homework 1, but mutate() works better than base R syntax when we want to use a series of pipes.
+
+Let's see if we succeeded in adding a column (if so, it will appear at the very end):
+
+```{r}
+glimpse(thermal)
+```
+
+Success!
+
+
+#### 1.2: Group_by and Summarize
+
+So now we can start to group and summarize our data frame, which is often useful for calculating summary statistics. Here we will just use it to check whether the number of unique scientific names matches the number of rows in the original data frame.
+
+```{r}
+thermal %>%
+  group_by(scientific_name) %>%
+  summarize() %>%
+  nrow()
+```
+
+This is a longer pipeline, involving multiple pipes. When reading your code, you can think of the pipe like "then". In the example above: "Take the thermal data frame, **then** group it by scientific name, **then** summarize the grouped data frame, **then** count the number of rows in that summary."
+
+If you scroll up, you'll notice that this number is the same as the number of rows in the original data frame. So we have determined that each row in this data set represents one species. However, the columns represent multiple observations of that species from different published studies.
+
+
+#### 1.3: Tidy Data
+
+Generally, when making plots or analyzing data, we would prefer that data be in what is called a "tidy" format. That is where the tidyverse set of libraries gets its name.
+
+So what are "tidy" data? Tidy data are data organized so that each row is an observation, and each column is a variable.
+
+In this case, a tidy format would place each published thermal tolerance (which is really one observation) in its own row, and it would repeat information like genus and species in each of those observation rows. Instead, these data are organized in what is sometimes referred to as a wide format. In each row we see columns of information about multiple maximum temperature thresholds. I won't describe all of them, but here are the columns specifically about the measurement that the authors decided they were most confident of for each species:
+
+* N: number of individuals tested
+* Tmax: maximum threshold temperature in degrees C
+* max_metric: what kind of threshold was this?
+* error: error estimate in degrees C
+* error.measure: what kind of error was reported?
+* lat_max: the latitude that the tested individuals were found at
+* long_max: the longitude that the tested individuals were found at
+* elevation_max: the elevation that tested individuals were found at
+* REF_max: reference that the measurement came from
+* location_max: code for the region that the tested individuals came from
+
+You'll notice that they included this same information for minimum thresholds in another set of columns, which are mostly named the same way except with 'min' instead of 'max'. However, there are a few confusing exceptions:
+
+* N.1: number of individuals tested to get a minimum threshold
+* tmin: minimum threshold temperature in degrees C
+* error.2: minimum threshold error estimate in degrees C
+* error_type: what kind of error was reported?
+
+If we wanted to include all of the observations, including those that the authors were less confident about (e.g., Tmax_2 and tmin_2) in our analysis we might want to convert this data set into a long format with rows for each observation. That conversion process could be done in several steps using the pivot_longer() function. However, for now, let's use a simpler approach which will help us practice a few more useful tidyverse functions.
+
+
+#### 1.4: Select
+
+First, let's create 2 new data frames, which we'll call maxima and minima, each of which will only contain a subset of all of the columns. To make things easier, we'll just focus on columns that contain certain information about the measurements that the authors were most confident about. We'll use a handy function called select, which will allow us to select only certain columns.
+
+```{r}
+maxima <- thermal %>%
+  select(scientific_name, 
+         Phylum,
+         Class,
+         Order,
+         Family,
+         Genus, 
+         Species,
+         Tmax, 
+         max_metric, 
+         lat_max,
+         long_max,
+         elevation_max,
+         REF_max)
+
+minima <- thermal %>%
+  select(scientific_name, 
+         Phylum,
+         Class,
+         Order,
+         Family,
+         Genus, 
+         Species,
+         tmin, 
+         min_metric, 
+         lat_min,
+         long_min,
+         elevation_min,
+         REF_min)
+```
+
+Now we have two new data frames, one with minimum thresholds for all the species and one with maximum thresholds for all of the species. Each of these data frames is now in a tidy format with one row representing only one observation.
+
+Try saving a different subset of columns. Some useful things that you can do with select are to select columns using a range like this:
+
+select(Tmax:location_max)
+
+which will give you all of the columns from Tmax to location_max or even select columns using strings contained in the column names like this:
+
+select(contains("min"))
+
+```{r}
+my_test_df <- thermal %>%
+  select(Genus : N,
+         contains("error"))
+```
+
+
+#### 1.5: Rename
+
+The next thing we'll do to make our lives a bit easier is rename the variables/columns so that they are the same for both data sets. We do this with another handy function called rename.
+
+```{r}
+maxima <- maxima %>%
+  rename(threshold = Tmax,
+         metric = max_metric,
+         latitude = lat_max,
+         longitude = long_max,
+         elevation = elevation_max,
+         reference = REF_max)
+
+minima <- minima %>%
+  rename(threshold = tmin, # there was a typo in the original code
+         metric = min_metric,
+         latitude = lat_min,
+         longitude = long_min,
+         elevation = elevation_min,
+         reference = REF_min)
+```
+
+You see that in rename we make a list of the variables we want to rename. We put the new name first, then an '=' sign, then the old name. 
+
+Check out the new column names to check that this worked:
+
+```{r}
+glimpse(maxima)
+```
+
+Glimpse the minima data frame just to check that it worked:
+
+```{r}
+glimpse(minima)
+```
+
+1. You'll notice something odd here. Look at the type (integer, character, double, logical, etc.) of the threshold column in the minima data frame. What is it currently?  
+The threshold column of the minima data frame has the character type rather than the double type like in the maxima data frame.
+
+
+#### 1.6: Converting types with mutate
+
+If we were doing a more thorough analysis, we would want to look through that column to see whether there are typos that may be causing R to interpret it that way, but for now we'll just change it to numeric so we can plot it later. Let's do that using mutate() and the as.numeric() function, which will tell R to convert the data to be numeric:
+
+```{r}
+minima <- minima %>%
+  mutate(threshold = as.numeric(threshold))
+  # in this case, mutate is used to override an existing column rather than introduce a new one
+
+glimpse(minima)
+```
+
+Nice job! You've wrangled a very complicated data structure and are now ready to do some more serious data exploration.
+
+
+----
+
+### Part 2: Exploratory data analysis
+
+Exploratory data analysis is a way to quickly assess whether there are interesting trends in your data that you will want to explore more thoroughly. Often it involves plotting and/or modeling, and sometimes it involves a few more data wrangling steps as you ask different questions about your data.
+
+#### 2.1: Metrics used for different taxa
+
+First, clearly we have multiple types of temperature thresholds for both minima and maxima. Let's see what those are. We can use select and unique for this (although you learned other ways to do this in base R in homework 1). We'll start with the maxima:
+
+```{r}
+maxima %>%
+  select(metric) %>%
+  unique()
+```
+
+These metric codes represent:
+
+* UTNZ: the upper thermal neutral zone (highest temperature at which no evaporative cooling mechanisms were initiated)
+* ct50: the high temperature at which half of tested organisms lost coordination
+* ctmax: the high temperature at which all tested organisms lost coordination
+* LT0: the highest temperature tested at which no tested organisms died
+* LT50: the high temperature at which half of organisms died
+* LT100: the high temperature at which all tested organisms died
+
+One thing we can do to make these easier to analyze is to make this column into a factor vector with levels so we can tell R what order we want the metrics in
+
+We can do this with mutate() and factor():
+
+```{r}
+maxima <- maxima %>%
+  mutate(metric = factor(metric, levels = c("UTNZ", 
+                                            "ct50", 
+                                            "ctmax",
+                                            "LT0", 
+                                            "LT50", 
+                                            "LT100")))
+```
+
+Now let's look at how those metrics were used across phyla using stacked bar plots:
+
+```{r}
+maxima %>%
+  # drop_na is another useful tidyverse function to get rid of rows with NAs in certain columns
+  drop_na(metric) %>%
+  # we are piping the modified data frame to ggplot so we don't start with a data argument
+  ggplot(aes(x = Phylum, fill = metric)) +
+  geom_bar() +
+  # we'll angle the phylum names so they don't overlap
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+```
+
+For reference, these are the common names of the phyla:
+
+* Annelida: segmented worms (earthworms, leeches, etc.)
+* Arthropoda: arthropods (insects, crustaceans, arachnids, millipedes, etc.)
+* Ascomycota: sac fungi (morels, truffles, brewer's yeast, etc.)
+* Brachiopoda: brachiopods (lamp shells, etc.)
+* Bryozoa: moss animals (mostly aquatic, colonial, and sedentary animals)
+* Chlorophyta: green algae
+* Chordata: vertebrates (mammals, birds, amphibians, reptiles, fish, etc.) and tunicates/cephalochordates
+* Echinodermata: echinoderms (sea stars, sea urchins, sand dollars, etc.)
+* Mollusca: mollusks (snails, oysters, squids, etc.)
+* Phaeophyceae: brown algae (kelp, Sargasso seaweed, etc.)
+* Rhodophyta: red algae (marine seaweeds, etc.)
+* Streptophyta: plants (all land plants, freshwater green algae)
+
+1. Which phylum has the most studied species?  
+Chordata is the most-studied; the stacked bar plot above shows a far greater count for chordata observations than for any other phylum.
+
+3. What metrics were most commonly used in that phylum?  
+UTNZ and ctmax were the most common metrics in the Chordata phylum.
+
+
+#### 2.2: Filter
+
+Let's look more closely at chordates. We can use another handy function called filter to remake our stacked bar plots, but this time with different classes in the phylum chordata. Filter() works very similarly to using logical expressions to get a subset of rows using base R, but it's a bit easier to read:
+
+```{r}
+maxima %>%
+  # we can use filter to ask for specific rows based on a logical expression, much like we did in base R
+  filter(Phylum == "Chordata") %>%
+  drop_na(metric) %>%
+  ggplot(aes(x = Class, fill = metric)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+```
+
+For reference, these are the common names of the chordate classes:
+
+* Actinopteri: ray-finned fishes
+* Amphibia: amphibians
+* Archelosauria: turtles
+* Ascidiacea: tunicates
+* Aves: birds
+* Chrondrichthyes: cartilaginous fishes (e.g., sharks)
+* Lepidosauria: lizards and snakes
+* Mammalia: mammals
+
+1. What is the only metric used with birds and mammals? Why do you think that might be?  
+Birds and mammals only have UTNZ metrics recorded. This is probably because we as humans empathize more with these animals than we do with fishes, amphibians, and reptiles. The ethics board that presided over this experiment probably objected to doing harm to birds and mammals in particular.
+
+
+2. What is the most common metric used across all chordates?  
+ctmax is the metric used most commonly across chordates.
+
+
+3. Why might it be misleading to make a box plot comparing the thresholds of different phyla in this data set where the only aesthetics were aes(x = Phylum, y = threshold)? What other variable(s) would you want to add to the plot?  
+If there were box plots made with only x = Phylum and y = threshold, that would give no indication of what metrics the thresholds corresponded to. In that case, you couldn't tell whether the median temperature (threshold) plotted for a phylum is a temperature that would definitely kill the organisms or a temperature that they could survive comfortably at. (Apparently the authors lumped all the thresholds together regardless of metric in the published paper, which is strange.) I faceted the box plots by metric in order to separate the different categories of threshold. This gives a better sense for what metrics were collected for each phylum. 
+
+```{r}
+maxima %>%
+  drop_na(metric) %>%
+  ggplot(aes(x = Phylum, y = threshold)) +
+  geom_boxplot() +
+  facet_wrap(~metric) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+```
+
+
+#### 2.3 Practicing with the minima
+
+Now you can perform the same set of steps for the minima-
+
+
+##### 2.3.1
+
+I'll do the refactoring first as it's a bit tedious. Here are the metrics we need to put in order:
+
+* LTNZ: the lower thermal neutral zone (lowest temperature at which no metabolic heating mechanisms were initiated)
+* ct50: the low temperature at which half of tested organisms lost coordination
+* LT0: the lowest temperature tested at which no tested organisms died
+* LT50: the low temperature at which half of organisms died
+* LT100: the low temperature at which all tested organisms died
+* SCP: supercooling point (temperature at which body fluids begin to freeze)
+
+**Note:** 0.4 seems to be a typo in the metric column which we would want to deal with in a more formal analysis, but for now we'll just let the factor() function convert it to NA
+
+```{r}
+minima <- minima %>%
+  mutate(metric = factor(metric, levels = c(
+    "LTNZ",
+    "ct50",
+    "ctmax",
+    "LT0",
+    "LT50",
+    "LT100",
+    "SCP")))
+```
+
+
+##### 2.3.2
+
+Look at how those minima metrics were used across phyla using stacked bar plots. I would recommend using drop_na(metric) and ggplot() with geom_bar():
+
+```{r}
+minima %>%
+  drop_na(metric) %>%
+  ggplot(aes(x = Phylum, fill = metric)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+```
+
+1. Which phylum has the most studied species?  
+The most-studied phylum is once again Chordata.
+
+2. What metrics were most commonly used in that phylum?  
+LTNZ was the most commonly used metric in Chordata, followed by LT50.
+
+
+##### 2.3.3
+
+Now we'll remake the minima stacked bar plots, but this time with different classes in the phylum chordata using drop_na(), filter(), and ggplot() with geom_bar():
+
+```{r}
+minima %>%
+  filter(Phylum == "Chordata") %>%
+  drop_na(metric) %>%
+  ggplot(aes(x = Class, fill = metric)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+```
+
+1. What is the only minimum metric used with birds and mammals? Why do you think that might be?  
+LTNZ is the only minimum metric used with birds and mammals. Once again, this is probably due to ethics concerns being applied more heavily to animals that we as humans can relate to.
+
+
+2. What is the most common metric used across all chordates?  
+The most common metric across chordates is LTNZ.
+
+
+Use pipes and the filter() and select() functions to determine which phyla and classes had reported supercooling points (metric is "SCP"):
+
+```{r}
+minima %>%
+  select(scientific_name, Phylum, Class, metric) %>%
+  filter(metric == "SCP")
+```
+
+
+#### 2.4: Investigating relationship with latitude
+
+Before we look at the effect of latitude on thresholds, let's see how latitude is represented in these data frames:
+
+```{r}
+maxima %>%
+  ggplot(aes(y = latitude)) +
+  geom_boxplot()
+```
+
+We see that latitudes here are both positive and negative (negative in the southern hemisphere and positive in the northern hemisphere), but what we're really most interested in is: how does adapting to habitats at different distances from the equator affect species' temperature thresholds? Therefore, we really want the absolute value of the latitude, which we can get using the abs() function from base R.
+
+If we want to look at patterns in thresholds across latitudes, we have to consider what other factors might affect minimum and maximum thresholds. Two that we have investigated so far are taxon and metric used. For now, let's focus on the two thresholds with the most data, upper thermal neutral zone ("UTNZ") and lower thermal neutral zone ("LTNZ"), and let's use color to differentiate by class (birds and mammals).
+
+
+##### 2.4.1: Maxima
+
+```{r}
+maxima %>%
+  filter(metric == "UTNZ") %>%
+  drop_na(threshold) %>%
+  ggplot(aes(x = abs(latitude), y = threshold, color = Class)) +
+  geom_point(size = 0.5) +
+  geom_smooth(method = "lm") +
+  labs(x = "Degrees from the equator", y = "Upper thermal neutral zone (degrees C)")
+```
+
+The geom_smooth() function adds a curve and 95% confidence interval using the method that you provide (default method is LOESS). Here we told it to plot a simple linear regression line ("lm").
+
+1. Based on this plot, does there seem to be any relationship between the distance from the equator and birds' or mammals' upper thermal neutral zone thresholds?  
+There doesn't seem to be much of a correlation between distance from equator and UTNZ thresholds. The linear regressions have slopes that don't seem to be significantly different from 0.
+
+
+One curious thing you may have noticed is that three species have very low upper thermal threshold of less than 25 degrees C. Try using the filter() and select() functions to see what species these are:
+
+```{r}
+maxima %>%
+  select(scientific_name, metric, threshold) %>%
+  filter(threshold < 25, metric == "UTNZ")
+```
+
+
+##### 2.4.2: Minima
+
+Now make a scatter plot of distance from the equator vs **lower** thermal neutral zone thresholds, with color indicating class:
+
+```{r}
+minima %>%
+  filter(metric == "LTNZ") %>%
+  drop_na(threshold) %>%
+  ggplot(aes(x = abs(latitude), y = threshold, color = Class)) +
+  geom_point(size = 0.5) +
+  geom_smooth(method = "lm")
+```
+
+1. Based on this plot, does there seem to be any relationship between the distance from the equator and birds' or mammals' lower thermal neutral zone thresholds?  
+There does seem to be a relationship between distance from equator and LTNZ of birds and mammals, though more so with birds. The further from the equator, the lower the minimum temperature tolerated. The slope of the Aves linear regression is more significantly nonzero than that of Mammalia; the latter only shows a weak correlation. 
+
+
+
+2. Why might upper and lower thermal limits show different trends across latitudes?
+As far as I know, it is generally easier for an organism to heat up than to cool down. Methods to retain or create heat, such as growing thick fur for insulation, are more efficient in controlling body temperature than methods to dissipate or avoid heat, such as sweating or seeking shelter. Also, if many of the important proteins in Aves and Mammalia are highly conserved, then these proteins probably all have similar upper limits for temperature that can be endured. That could explain why the maximum temperature tolerated seems to stay relatively constant regardless of location, while minimum temperature tolerated is lower for colder locations (i.e. further from the equator). 
+
+
+
+----
+
+### Optional, if you want to do the extra credit part of the independent homework
+
+It's often useful to join data from two different data frames to create one data frame with a larger number of columns. In many cases, researchers store different types of data in different spreadsheets. This can be very useful to avoid re-entering the same data over and over again, which can lead to errors in data entry. It also makes each part of the data set more manageable. But sometimes you have to bring the different parts together in order to ask questions about trends in the data.
+
+Let's make two dummy data frames to illustrate this:
+
+```{r}
+bees <- data.frame(
+  species = c("Apis mellifera", "Bombus affinis", "Lasioglossum spivakae", "Osmia cornifrons"), 
+  family = c("Apidae", "Apidae", "Halictidae", "Megachilidae"), 
+  nest = c("Cavity", "Ground", "Ground", "Stem")
+  )
+
+sites <- data.frame(
+  site = c("A", "A", "B", "B", "C", "C"),
+  species = c("Apis mellifera", "Lasioglossum spivakae", "Apis mellifera", "Bombus affinis", "Lasioglossum spivakae", "Apis mellifera")
+)
+```
+
+We can make a new data combined data using the join function from the dplyr library. For now, we'll just learn full_join, which keeps all of the rows from both of the data frames and fills in NAs in columns where they don't match.
+
+```{r}
+combined_df <- sites %>%
+  full_join(bees, by = "species")
+
+view(combined_df)
+```
+
+1. Why does one row have an NA value in the site column?  
+Osmia cornifrons didn't show up in any of the sites. Because this was a full join rather than a left join, there was still a row made for Osmia cornifrons, it just doesn't have a site associated.
+
+
+Nice work!
+
+----

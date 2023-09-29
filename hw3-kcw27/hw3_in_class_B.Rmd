@@ -1,0 +1,415 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## File metadata
+
+Template author: Morgan Carr-Markell  
+Template last modified on: Fed 7th, 2023  
+Notebook modified by:  
+Notebook last modified on: 
+
+
+## Data set citation:
+
+Tanalgo K.C., Tabora J.A.G., Oliveira H.F.M., Haelwaters D., Beranek C.T., Otálora-Ardila A., Bernard E., Gonçalves F., Eriksson A., Donnelly M., González J.M., Ramos H.F., Rivas A.C., Webala P., Deleva S., Dalhoumi R., Maula J., Lizarro D., Aguirre L., Bouillard N., Quibod M.N.R., Barros J., Turcios-Casco M.A., Martínez M., Ordoñez-Mazier D.I., Orellana J.A.S., Ordoñez-Trejo E.J., Ordoñez D., Chornelia A., Lu J.M., Xing C., Baniya S., Muylaert R.L., Dias-Silva L., Ruadrea N., Hughes A.C., (2021). DarkCideS 1.0, a global database for bats in karsts and caves. Authorea Preprints DOI: 10.22541/au.163578759.92395202/v1
+
+
+## Article the data set is from
+
+Tanalgo, K. C., Tabora, J. A. G., de Oliveira, H. F. M., Haelewaters, D., Beranek, C. T., Otálora-Ardila, A., ... & Hughes, A. C. (2022). DarkCideS 1.0, a global database for bats in karsts and caves. Scientific Data, 9(1), 155.
+
+
+## Data set description
+
+The authors of this data set wanted to create something that could be useful for understanding the distribution of bat biodiversity across cave sites around the world. This data set is an example of a database created by surveying the literature for studies that all ask a particular question but in different systems (species, habitats, etc.). In this case, the measurements reported are bat species lists for cave sites and information about those species from the IUCN red list.
+
+
+### Loading libraries
+
+```{r message=FALSE}
+library(tidyverse)
+library(dplyr)
+```
+
+
+### Reading in data
+
+```{r}
+bats <- read.csv("data/Tanalgo_etal_2021_Dataset1.csv")
+caves <- read.csv("data/Tanalgo_etal_2021_Dataset2.csv")
+```
+
+
+### Part 1: Data cleaning/wrangling
+
+Data cleaning usually refers to fixing errors or inconsistencies in the data. You may be tempted to clean the original data file using a spreadsheet program like excel, but it is far better for reproducibility if you do this in R instead and leave the original data file as it is. In that way, you and anyone who uses your code can see what data cleaning steps you did and can fix any errors in those steps.
+
+Data wrangling is anything you need to do to get your data in a form that you can analyze. This process can be challenging, as the name wrangling suggests, but tidyverse functions are there to make the process easier. Let's learn a few of the most useful functions.
+
+First, let's look at the caves data set:
+
+```{r}
+view(caves)
+```
+
+If you scroll over to the Cave.site column, you'll see that many cave sites appear in multiple rows with different bat species listed in each row. We'll come back to this format below when we talk about tidy data.
+
+Now lets look at the bats data set structure using the glimpse() function:
+
+```{r}
+glimpse(bats)
+```
+
+You can see right away that this data frame has many columns! It contains a lot of useful information about the habitat preferences, IUCN status, range size, endemic status, and threats faced by each species of bat.
+
+To get started, let's learn how to summarize the alpha diversity of bat caves across different latitude ranges.
+
+
+#### 1.1: The Pipe (%>%)
+
+To do that, we should first talk about a very useful bit of syntax in R: the pipe (%>%)
+
+Pipes allow you to take an object like a data frame and then perform a series of data manipulations in a way that is easy to read and understand later. Each time you use a pipe, what you are doing is telling R to take the output from the last command and make that into the first argument to the next function. So:
+
+a %>% f(b)
+
+is the same as:
+
+f(a, b)
+
+That piping process allows you to use multiple tidyverse functions one after another to make successive changes to the data structure without needing to write nearly as much code. Here's a simple example, using the mutate function:
+
+```{r}
+caves <- caves %>%  
+  mutate(Latitude.range = (Lattitude %/% 10) * 10)
+  # note: they accidentally spelled latitude as lattitude, which I also do all the time
+  # so it's reassuring to see it in a published data set :)
+```
+
+Here we have overwritten the original thermal data frame with the output of this pipeline. Note the %>% syntax to pipe the thermal data frame to the next command, which in this case is the mutate function. Mutate creates a new variable/column, which we name and define. You can see that this accomplishes the same things that we did when adding columns to a data frame using base R in homework 1, but mutate() works better than base R syntax when we want to use a series of pipes.
+
+This isn't the ideal way to define latitude ranges because it creates a range around the equator that is wider than the others (20 vs 10 degrees), but it will help us get a quick look at trends across latitudes. If we wanted better categories for a more formal analysis, we could write a function to create the new column.
+
+Let's see if we succeeded in adding a column (if so, it will appear at the very end):
+
+```{r}
+glimpse(caves)
+```
+
+Success! Now try adding another column. It can be named any valid name (except for the column names already in the data frame) and it can use any of the existing columns (or you could just set the whole column equal to your favorite number or word or something like that):
+
+```{r}
+TODO
+```
+
+
+#### 1.2: Group_by and Summarize
+
+So now we can start to group and summarize our data frame, which is often useful for calculating summary statistics. Here we will make a new table with alpha diversities for each range of 10 degrees of latitude (note: the 0 range is actually 20 degrees).
+
+```{r}
+caves %>%
+  group_by(Latitude.range, Cave.site) %>%
+  summarize(Alpha.div = n()) %>%
+  group_by(Latitude.range) %>%
+  summarize(Mean.cave.alpha = mean(Alpha.div))
+```
+
+This is a longer pipeline, involving multiple pipes. When reading your code, you can think of the pipe like "then". In the example above: "Take the caves data frame, **then** group it by latitude range and cave site, **then** summarize the alpha diversity of the cave sites using the n() function, which counts the number of rows per group, **then** group just by latitude range, **then** summarize the mean alpha diversity across cave sites in each latitude range."
+
+1. Which latitude range had the highest mean diversity per cave?
+
+
+
+#### 1.3: Tidy Data
+
+Generally, when making plots or analyzing data, we would prefer that data be in what is called a "tidy" format. That is where the tidyverse set of libraries gets its name.
+
+So what are "tidy" data? Tidy data are data organized so that each row is an observation, and each column is a variable.
+
+In the case of the bats data frame, a tidy format would place each combination of habitat preference/bat species in its own row (observation). Instead, these data are organized in what is sometimes referred to as a wide format. In each row we see columns of information about multiple habitat types and multiple threats. 
+
+If we wanted to convert this data set into a long format with rows for each observation, we could do that in several steps using the pivot_longer() function. However, for now, let's use a simpler approach which will help us practice a few more useful tidyverse functions.
+
+
+#### 1.4: Select
+
+First, let's focus on a smaller subset of variables from the bats data frame. We'll use a handy function called select, which will allow us to select only certain columns.
+
+```{r}
+bats_short <- bats %>%
+  select("Suborders",
+"Families",
+"Species.name",
+"Genus",
+"Species",
+"Conservation.status",
+"Geopolotical.endemism",
+"Biogeographic.breadth",
+"Feeding.groups",
+"Current.range",
+"Body.mass",
+"Generation.length")
+```
+
+Now we have a new, tidy data frame in which each row is a species and each column contains a different variable (as opposed to having multiple columns that contain information about threats to the species).
+
+Try saving a different subset of columns. Some useful things that you can do with select are to select columns using a range like this:
+
+select(forest:wetlands)
+
+which will give you all of the columns from forest to wetlands or even select columns using strings contained in the column names like this:
+
+select(contains("source"))
+
+```{r}
+my_test_df <- bats %>%
+  TODO
+```
+
+
+#### 1.5: Rename
+
+The next thing we'll do to make our lives a bit easier is rename some the variables/columns so that they follow standard spellings and convert plural to singular forms (which I find easier to remember). We can do this with another handy function called rename.
+
+```{r}
+bats_short <- bats_short %>%
+  rename(Suborder = Suborders,
+        Family = Families,
+        Geopolitical.endemism = Geopolotical.endemism
+        )
+```
+
+You see that in rename we make a list of the variables we want to rename. We put the new name first, then an '=' sign, then the old name. 
+
+Check out the new column names to check that this worked:
+
+```{r}
+glimpse(maxima)
+```
+
+Now it's your turn. Rename the Feeding.groups column so that it is now Feeding.group:
+
+```{r}
+bats_short <- TODO
+```
+
+And look at the data frame again just to check that it worked:
+
+```{r}
+glimpse(bats_short)
+```
+
+1. Look at the type (integer, character, double, logical, etc.) of the Conservation.status column in the bats_short data frame. What is it currently?
+
+
+
+#### 1.6: Converting types with mutate
+
+For later plotting, it will be helpful to convert that Conservation.status column to be a factor vector so that we can set the levels of the factor. First, let's look at what the unique values are using the select() function to select a column, and the unique() function to return a column of unique values:
+
+```{r}
+bats_short %>%
+  select(Conservation.status) %>%
+  unique()
+```
+
+
+Let's convert it using mutate() and the factor() function:
+
+```{r}
+bats_short <- bats_short %>%
+  mutate(Conservation.status = factor(Conservation.status, 
+                                      levels = c("Critically Endangered",
+                                                 "Endangered",
+                                                 "Vulnerable",
+                                                 "Near Threatened",
+                                                 "Least Concern",
+                                                 "Data Deficient")))
+
+glimpse(bats_short)
+```
+
+Now Conservation.status will always be ordered with "Critically Endangered" first and "Data Deficient" last.
+
+Just for practice, convert Geopolitical.endemism to be a factor and set the levels to whatever order of the two values in that column seems best to you:
+
+```{r}
+bats_short <- bats_short %>%
+  TODO
+```
+
+Nice job! You've wrangled a very complicated data structure and are now ready to do some more serious data exploration.
+
+
+----
+
+### Part 2: Exploratory data analysis
+
+Exploratory data analysis is a way to quickly assess whether there are interesting trends in your data that you will want to explore more thoroughly. Often it involves plotting and/or modeling, and sometimes it involves a few more data wrangling steps as you ask different questions about your data.
+
+
+#### 2.1: Investigating differences among Red List categories
+
+Let's first look at how the IUCN conservation status categories are related to some categorical variables using stacked bar plots.
+
+Endemism:
+
+```{r}
+bats_short %>%
+  ggplot(aes(x = Conservation.status, fill = Geopolitical.endemism)) +
+  geom_bar() +
+  # we'll angle the conservation status names so they don't overlap
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+```
+
+1. Which conservation status category includes the most species? Which includes the least?
+
+
+2. Do you see any trend in endemism across the conservation status categories?
+
+
+
+Recreate the plot above with Feeding.group instead of Geopolitical.endemism:
+
+```{r}
+bats_short %>%
+  TODO
+```
+
+3. Which conservation status categories contain sanguivores (bats that feed on blood)?
+
+
+
+#### 2.2: Filter
+
+Let's look more closely at the threatened (Critically Endangered, Endangered, and Vulnerable) species. We can use another handy function called filter to remake our stacked bar plots, but this time with different biogeographic regions shown. Filter() works very similarly to using logical expressions to get a subset of rows using base R, but it's a bit easier to read:
+
+```{r}
+bats_short %>%
+  # we can use filter to ask for specific rows based on a logical expression, much like we did in base R
+  filter(Conservation.status %in% c("Critically Endangered", "Endangered", "Vulnerable")) %>%
+  ggplot(aes(x = Conservation.status, fill = Biogeographic.breadth)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+```
+
+1. Are threatened bat species concentrated in one region or spread across many regions?
+
+
+
+Now let's make some box plots of continuous variables across the conservation status categories:
+
+Current range:
+
+```{r}
+bats_short %>%
+  ggplot(aes(x = Conservation.status, y = Current.range)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+```
+
+2. What pattern do you see in the ranges of species across different conservation status categories?
+
+
+
+3. Why might we expect this pattern?
+
+
+
+
+#### 2.3 Practicing with other continuous variables
+
+Try making boxplots to compare body mass and generation length across conservation status categories.
+
+Body.mass:
+
+```{r}
+TODO
+```
+
+Generation.length:
+
+```{r}
+TODO
+```
+
+1. Do you see clear patterns for either variable?
+
+
+
+2. Why do you think that might be?
+
+
+
+#### 2.4: Investigating relationships between continuous variables
+
+Let's see if body mass and generation length are related using a scatter plot:
+
+```{r}
+bats_short %>%
+  ggplot(aes(x = Generation.length, y = Body.mass)) +
+  geom_point() + 
+  geom_smooth(method = "lm")
+```
+
+Try recreating this plot but just for bats in the fruit-eating feeding group (Feeding.group, "Frugivore", the filter function will be helpful here):
+
+```{r}
+TODO
+```
+
+1. Does it look like there is a significant relationship between those 2 variables within this feeding group?
+
+
+
+
+----
+
+### Optional, if you want to do the extra credit part of the independent homework
+
+It's often useful to join data from two different data frames to create one data frame with a larger number of columns. In many cases, researchers store different types of data in different spreadsheets. This can be very useful to avoid re-entering the same data over and over again, which can lead to errors in data entry. It also makes each part of the data set more manageable. But sometimes you have to bring the different parts together in order to ask questions about trends in the data.
+
+For example, what if we wanted to know whether threatened species are more concentrated at certain latitudes? We would need data on latitude from the caves data frame and data on endemism from the bats_short data frame.
+
+
+#### 3.1: full_join
+
+For this we can use the join functions from the dplyr library. The one we'll learn today is full_join, which keeps all of the rows from both of the data frames and fills in NAs in columns where they don't match.
+
+```{r}
+combined_df <- caves %>%
+  full_join(bats_short, by = "Species.name")
+
+glimpse(combined_df)
+```
+
+We can specify the columns to use in matching data frames or we can let R look for columns with the same name in both data sets.
+
+Try running it again without the 'by = "Species.name" '
+
+```{r}
+TODO
+```
+
+
+#### 3.2: Summarizing the combined data
+
+Now we can make box plots of the latitudes where different categories of bats were found.
+
+```{r}
+combined_df %>%
+  ggplot(aes(x = Conservation.status, y = Lattitude, fill = Conservation.status)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+```
+
+1. You can see that none of the bats observed in the caves were in the critically endangered category. Why do you think that might be?
+
+
+
+
+
+Nice work!
