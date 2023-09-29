@@ -1,0 +1,332 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## 1.1 File metadata 
+
+Template author: Morgan Carr-Markell  
+Template last modified on: March 28, 2023  
+Notebook modified by: Katie Wang  
+Notebook last modified on: April 3, 2023
+
+
+## 1.2 Data sources
+
+1. Fill in your citations-
+
+* Species occurrence data:  
+
+GBIF.org (03 April 2023) GBIF Occurrence Download  https://doi.org/10.15468/dl.nepwjz
+
+* Environmental data:  
+
+Tyberghein L, Verbruggen H, Pauly K, Troupin C, Mineur F, De Clerck O (2012) Bio-ORACLE: A global environmental dataset for marine species distribution modelling. Global Ecology and Biogeography, 21, 272–281.
+
+Assis, J., Tyberghein, L., Bosh, S., Verbruggen, H., Serrão, E. A., & De Clerck, O. (2017). Bio-ORACLE v2.0: Extending marine data layers for bioclimatic modelling. Global Ecology and Biogeography.
+
+
+## 1.4 Libraries
+
+```{r, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(raster)
+library(terra)
+library(geodata)
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+```
+
+
+## 2 Occurrence data
+```{r}
+# redownloaded data from GBIF following these guidelines 
+# https://drive.google.com/file/d/1uphy1my20d--CEgnYR8xaMrc1U8EJLDE/view
+# only includes human observations with coordinates and made after 1950
+CS_occurrences_df <- read.csv("crab_data/Callinectes_sapidus_0141269-230224095556074.csv",
+                              sep = "\t")
+
+# demonstrate that filtering worked for year and coordinates
+CS_occurrences_df %>%
+  group_by(is.na(decimalLatitude), is.na(decimalLongitude)) %>%
+  summarize(earliest_date = min(year))
+# no NA's for coordinates, and earliest date is after 1950
+
+# also select only columns relevant for analysis
+CS_occurrences_df <- CS_occurrences_df %>%
+  dplyr::select(decimalLongitude, decimalLatitude)
+```
+
+
+### 2.1 Inspecting and filtering data
+
+2. Inspect your occurrence data for coordinate outliers and remove them if you need to:
+
+```{r}
+worldMap <- ne_countries(scale = "medium", type = "countries", returnclass = "sf")
+
+crab_sf <- st_as_sf(CS_occurrences_df,
+                     coords = c("decimalLongitude", "decimalLatitude"),
+                     crs = 4326)
+
+ggplot() +
+  geom_sf(data = worldMap) +
+  geom_sf(data = crab_sf)
+
+# The points in the Pacific Ocean and the Indian Ocean seem to be outliers, so I'll crop these
+# st_crop has been acting up for me, so I will go back to CS_occurrences_df to filter them out
+# and remake crab_sf
+CS_occurrences_df <- CS_occurrences_df %>%
+  filter(decimalLongitude > -100 & decimalLongitude < 35)
+
+crab_sf <- st_as_sf(CS_occurrences_df,
+                     coords = c("decimalLongitude", "decimalLatitude"),
+                     crs = 4326)
+
+# redraw the map to check the crop
+ggplot() +
+  geom_sf(data = worldMap) +
+  geom_sf(data = crab_sf)
+
+# successfully cropped
+```
+
+
+### 2.2 Saving spatial extent
+
+3. Save a buffer around your occurrence points and also a bounding box around that for future use:
+
+```{r}
+# adapted from hw7_in_class.Rmd
+
+# Now, we project our point data to an equal-area projection, which converts our 
+# degrees to meters, which is ideal for buffering (the next step). 
+# We use the typical Eckert IV projection.
+eckertIV <- "+proj=eck4 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+
+# Buffer all occurrences by 500 km, union the polygons together 
+# (for visualization), and convert back to a form that the raster package 
+# can use. Finally, we reproject the buffers back to WGS84 (lat/lon).
+crab_occurrences_buffer <- crab_sf %>%
+  st_transform(crs = eckertIV) %>%
+  st_buffer(dist = 500000) %>%  # unit here is meters
+  st_union() %>% 
+  st_sf() %>%
+  st_transform(crs = 4326)
+
+# this will be used for cropping raster layers
+crab_occurrence_bounds <- crab_occurrences_buffer %>%
+  st_bbox()
+
+# It appears that the buffer was created successfully
+plot(crab_occurrences_buffer, border = "blue", lwd = 3)
+```
+
+
+## 3 Environmental data
+
+4. Which environmental data layers are you using and what types of files are they?  
+I'm using data from [Bio-ORACLE](https://www.bio-oracle.org/downloads-to-email.php), in TIFF Raster format. I've downloaded data for the present and for 2040-2050 RCP85. More specifically, these are benthic layers (maximum depth) and Lt. Min (average of the minimum records per year) for both temperature (Celsius) and salinity (PSS) because low temperature and low salinity are the major causes of overwinter mortality in the crabs.
+
+
+5. Read in the raster layers:
+
+```{r}
+present_temp <- raster("crab_data/Present.Benthic.Max.Depth.Temperature.Lt.min.tif")
+present_salinity <- raster("crab_data/Present.Benthic.Max.Depth.Salinity.Lt.min.tif")
+future_temp <- raster("crab_data/2050AOGCM.RCP85.Benthic.Max.Depth.Temperature.Lt.min.tif.BOv2_1.tif")
+future_salinity <- raster("crab_data/2050AOGCM.RCP85.Benthic.Max.Depth.Salinity.Lt.min.tif.BOv2_1.tif")
+```
+
+
+### 3.1 Inspecting data
+
+6. Plot a few of your environmental layers them using the plot() function from base R:
+
+```{r}
+plot(present_temp)
+plot(future_temp)
+plot(present_salinity)
+plot(future_salinity)
+# when I make figures for this project, I'll need to adjust the scales to
+# (a) be consistent between the two plots of the same variable
+# and (b) actually show patterns (currently, salinity shows solid green for oceans)
+```
+
+
+### 3.2 Standardardizing crs, resolution, and spatial extent
+
+
+#### 3.3.1 Coordinate reference system
+
+7. What are the coordinate reference systems of your raster layers?
+```{r}
+present_temp
+future_temp
+present_salinity
+future_salinity
+```
+All four raster layers have WGS84 as their CRS.
+
+8. If they are not WGS84 (4326), convert them all to WGS84 to match the GBIF points:
+
+```{r}
+
+```
+
+
+#### 3.3.2 Resolution
+
+8. What are the resolutions of your raster layers?  
+All of the raster layers have a resolution of (0.08333333, 0.08333333).
+
+9. If they are not the same, convert them all to the resolution of the raster layer with the lowest resolution using resample():
+
+```{r}
+
+```
+
+
+#### 3.3.3 Extent
+
+10. What are the extent of your raster layers?  
+They all have an extent of -180, 180, -90, 90  (xmin, xmax, ymin, ymax).
+
+11. If they all extend beyond your saved occurrence bounds, then crop them all to your occurrence bounds. If any are smaller, extend those:
+
+```{r}
+present_temp <- present_temp %>%
+  crop(crab_occurrence_bounds)
+
+future_temp <- future_temp %>%
+  crop(crab_occurrence_bounds)
+
+present_salinity <- present_salinity %>%
+  crop(crab_occurrence_bounds)
+
+future_salinity <- future_salinity %>%
+  crop(crab_occurrence_bounds)
+```
+
+
+### 3.4 Creating a raster stack
+
+12. Create a raster stack of the environmental layers to make sure you have matched the crs, resolutions, and extents:
+
+```{r}
+crab_stack <- stack(list(present_temp,
+           future_temp,
+           present_salinity,
+           future_salinity))
+
+# successfully created a raster stack
+```
+
+
+### 3.5 Exporting the processed raster layers as geoTIFF files
+
+13. Export the processed raster layers to a new folder called processed_data:
+
+```{r}
+if (!dir.exists("processed_data")){
+  dir.create("processed_data")
+}
+
+file_names <- paste0("processed_data/", names(crab_stack))
+
+writeRaster(crab_stack, 
+            filename = file_names,
+            format = "Gtiff",  # specify output format
+            bylayer = TRUE,
+            overwrite = TRUE, # CAUTION: if this is true, it will overwrite an existing file
+            NAflag = -9999)
+```
+
+
+## 4 Dealing with spatial autocorrelation
+
+14. Remove extra points that fall within the same grid squares of the environmental layers (use one environmental raster layer for comparison):
+
+```{r}
+# adapted from hw7_in_class.Rmd
+
+# Let's now remove occurrences that are cell duplicates -- these are
+# occurrences that share a grid cell in the predictor variable rasters.
+# Although Maxent does this by default, keep in mind that for other algorithms you may
+# or may not want to do this based on the aims of your study.
+# Another way to space occurrence records a defined distance from each other to avoid
+# spatial autocorrelation is with spatial thinning (Aiello-Lammens et al. 2015).
+occurrence_cells <- raster::extract(present_temp, 
+                            CS_occurrences_df,
+                            cellnumbers = TRUE)
+occurrence_cellDups <- duplicated(occurrence_cells[ , 1])
+CS_occurrences_df <- CS_occurrences_df[!occurrence_cellDups, ]
+
+plot(present_temp, main = "Annual Mean Lowest Temperature")
+points(CS_occurrences_df, pch = 20, cex = 0.2)
+```
+
+
+## 5 Background points
+
+
+### 5.1 Generating background
+
+15. Create and envs_background raster object using the one of the environmental raster layers cropped using the occurrences buffer you saved so you can randomly draw points from it:
+
+```{r}
+# adapted from hw7_in_class.Rmd
+
+# Crop environmental raster to match the study extent
+envs_background <- raster::crop(present_temp, crab_occurrences_buffer)
+
+# Next, mask the raster to the shape of the buffers
+envs_background  <- raster::mask(envs_background, crab_occurrences_buffer)
+
+# Now plot it
+plot(envs_background, main = "Annual Lowest Mean Temperature")
+points(CS_occurrences_df[ , c("decimalLongitude", "decimalLatitude")])
+plot(crab_occurrences_buffer, border = "blue", lwd = 3, add = TRUE)
+
+# Now that I look at it, there's quite a bit of land included within the buffer. 
+# This crab tends to be encountered along the coast, so it might be inevitable.
+# Should I decrease the buffer extents?
+```
+
+16. Sample 10,000 points from this envs_background object to create a background_df:
+
+```{r}
+background_df <- dismo::randomPoints(envs_background, n = 10000) %>% as.data.frame()
+colnames(background_df) <- colnames(CS_occurrences_df)
+```
+
+### 5.2 Plotting occurence and background points
+
+17. Check your work by plotting background points in black and thinned occurrence points in red on top of one of the environmental layers:
+
+```{r}
+plot(envs_background)
+points(background_df, pch = 20, cex = 0.2)
+```
+```{r}
+plot(present_temp, main = "Annual Lowest Mean Temperature")
+points(background_df, pch = 20, cex = 0.2)  # default color is black
+points(CS_occurrences_df, col = "red", pch = 20, cex = 0.2)
+# To add sf objects to a plot, use add = TRUE
+plot(crab_occurrences_buffer, border = "blue", lwd = 3, add = TRUE)
+```
+
+### 5.3 Writing out points
+
+18. Use the write.csv() function to save the occurrence_df and background_df in the processed_data folder. Remember to use row.names = FALSE:
+
+```{r}
+write.csv(CS_occurrences_df,
+          file = "processed_data/CS_occurrences.csv",
+          row.names = FALSE)
+
+write.csv(background_df,
+          file = "processed_data/background.csv",
+          row.names = FALSE)
+```
