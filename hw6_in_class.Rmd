@@ -1,0 +1,483 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## File metadata
+
+Template author: Morgan Carr-Markell  
+Template last modified on: March 21, 2023
+Notebook modified by: Katie Wang  
+Notebook last modified on: March 27, 2023
+
+
+## Goals of the assignment
+
+This homework assignment is meant to give you experience with:
+
+* cleaning/wrangling data
+* fitting linear models
+* testing the assumptions of linear models
+* dealing with spatial autocorrelation using mixed models
+* interpreting coefficients of models with transformed data
+
+It is based very loosely on this paper (but the data is slightly different and analyses here are far simpler):
+
+Katelin D. Pearson, Natalie L. R. Love, Tadeo Ramirez-Parada, Susan J. Mazer, Jenn M. Yost (2021) "Phenological trends in the california poppy (eschscholzia californica): digitized herbarium specimens reveal intraspecific variation in the sensitivity of flowering date to climate change," Madroño, 68(4), 343-359. https://doi.org/10.3120/0024-9637-68.4.343
+
+The purpose of that study was to use the newly-finished California phenology project records to determine whether climate change has influenced the timing of flowering of a common native California species, California poppy (*Eschscholzia californica*). Many of the records you will analyze for this assignment are in the California Botanic Garden's Herbarium.
+
+
+## Data citations
+
+Biodiversity occurrence data published by: CCH2 Portal (accessed through the CCH2 Portal Portal, https://www.cch2.org/portal, 2023-03-17).
+
+PRISM Climate Group, Oregon State University, https://prism.oregonstate.edu, data created 13 Jun 2021, accessed 14 Mar 2023.
+
+
+## Loading libraries
+
+```{r}
+library(tidyverse) # for wrangling data
+library(sf) # for creating/plotting sf points
+library(maps) # for mapping
+library(ape) # for testing whether there is spatial autocorrelation
+library(regclass) # for testing for multicollinearity
+library(spaMM) # for mixed models with spatial autocorrelation included
+library(RSpectra) # for faster model fitting
+```
+
+
+## Reading in data
+
+The csv file called occurrences is from the [CCH2 herbarium database portal](https://www.cch2.org/portal/). It includes only records of California poppy (*Eschscholzia californica*) that were collected in California and flowering when they were collected. This allows us to use the time of collection to analyze flower phenology (=timing of life history events).
+
+The csv files with mean temperature (degrees C) and annual precipitation totals (mm) were both generated using raster files from [PRISM](https://prism.oregonstate.edu/historical/), which we talked about on Monday in the spatial interpolation lecture slides. There is an R package called [prism](https://cran.r-project.org/web/packages/prism/prism.pdf) that allows you to download many raster files from the PRISM online database, but it takes a long time and the files are quite large because they cover the whole world in 4 km x 4 km grid squares. So for the purposes of this homework assignment I did the downloading and first processing steps for you, creating ~70MB csv files that each contain the bounds of the grid squares just for California, the centroids of the grid squares (x and y), and columns of values for each year from 1920 to 2020. These data are not in a tidy format, they are in a wide format, which makes the file sizes smaller and easier to share. However, that does mean that extracting the values you will need for each plant record will take a few minutes.
+
+```{r}
+CA_poppy <- read.csv("data/CA_poppy_occurrences.csv")
+tmean <- read.csv("data/California_grid_tmean_1920_2020.csv")
+ppt <- read.csv("data/California_grid_ppt_1920_2020.csv")
+```
+
+
+## Processing the occurrence records
+
+First, take a look at the CA_poppy records:
+
+```{r}
+glimpse(CA_poppy)
+```
+You'll notice that there are many columns about IDs, taxonomy, who collected the specimen, what specific collection it is part of, who entered the data into the database, etc.
+
+
+### Data wrangling
+
+For the purposes of this analysis, we're going to include year, mean annual temperature, and total annual precipitation as independent variables in our models. Temperature and precipitation values will come from the tmean and ppt data frames, but we'll need year from the CA_poppy data frame. Our dependent variable will be the day of the year that the flowering plant was collected (startDayOfYear). Finally, we will need to match plant specimens to temperature and precipitation at specific sites, and there may be spatial autocorrelation that we need to control for in our models. Therefore, we will need the coordinates of each observation (decimalLongitude and decimalLatitude).
+
+1. First, overwrite CA_poppy and select only:
+
+* year
+* decimalLongitude
+* decimalLatitude
+* startDayOfYear
+
+**Note:** You'll need to use dplyr::select instead of just select because multiple libraries we loaded have functions named 'select' in them.
+
+```{r}
+CA_poppy <- CA_poppy %>%
+  dplyr::select(year, decimalLongitude, decimalLatitude, startDayOfYear)
+```
+
+Next, we'll need to deal with the fact that multiple plants may have been collected at exactly the same site in the same year. One way to do this is to group by year, decimal Longitude, and decimalLatitude and then summarize across those groups to get the mean startDayOfYear for each.
+
+```{r}
+CA_poppy <- CA_poppy %>%
+  group_by(year, decimalLatitude, decimalLongitude) %>%
+  summarize(startDayOfYear = mean(startDayOfYear))
+```
+
+2. Then, use filter() get rid of rows we won't be able to use in our model, including rows where:
+
+* startDayOfYear is NA (Note: I'd recommend using !is.na(startDayOfYear))
+* year < 1920
+* year > 2020
+
+```{r}
+CA_poppy <- CA_poppy %>%
+  filter(!is.na(startDayOfYear)) %>%
+  filter(year >= 1920) %>%
+  filter(year <= 2020)
+```
+
+
+### Removing outliers
+
+Next, let's look to see if we should remove any data due to extreme (and probably erroneous) coordinates or flowering dates.
+
+We'll start by getting an outline of California from the R maps package to help us plot coordinates and decide whether they are reasonable:
+
+```{r}
+USA_sf <- st_as_sf(maps::map("state", 
+                             fill=TRUE, 
+                             plot =FALSE),
+                   crs = 4326) # WGS84
+
+CA_sf <- USA_sf %>%
+  filter(ID == "california")
+```
+
+Now let's create an sf version of the CA_poppy data frame:
+
+```{r}
+CA_poppy_sf <- st_as_sf(CA_poppy,
+                        coords = c("decimalLongitude", "decimalLatitude"),
+                        crs = 4326) # WGS84
+```
+
+Now we can plot the points:
+
+```{r}
+CA_poppy_sf %>%
+  ggplot() +
+  geom_sf(data = CA_sf, fill = "green4") +
+  geom_sf()
+```
+
+3. Do you see any points that seem wrong here?  
+Yes, there are some that lie far outside California.
+
+4. If so, remove those using st_crop, filling in the xmin, ymin, xmax, and ymax that seem reasonable to you:
+
+```{r}
+CA_poppy_sf <- CA_poppy_sf %>%
+  st_crop(c(xmin = -130, ymin = 32, xmax = 110, ymax = 50))
+# Sometimes this returns an empty df. That happened in my case.
+# A workaround: use the filter function on the longitude and latitude to impose these same boundaries.
+# I think the filtering would be done before converting it to sf.
+```
+
+Don't worry if you get an error message here about attribute variables.
+
+Redraw the map to check your work:
+
+```{r}
+CA_poppy_sf %>%
+  ggplot() +
+  geom_sf(data = CA_sf, fill = "green4") +
+  geom_sf()
+```
+
+
+6. Next, look at the range of startDayOfYear using a box plot or histogram:
+
+```{r}
+hist(CA_poppy$startDayOfYear)
+```
+
+This distribution is difficult to judge, but there aren't very clear large gaps in the data. Without more knowledge of the life history of this species, I would keep all of these points.
+
+
+## Extracting environmental variables
+
+The function I wrote below is not the most efficient function, but it will allow us to extract the associated temperature and precipitation values from the tmean and ppt data frames for each row of our CA_poppy data frame.
+
+```{r}
+find_climate_var <- function(year, longitude, latitude, climate_df){
+  # to match the correct year column
+  lookup_column <- paste0("year_", as.character(year))
+  
+  # filter to get the correct spatial grid square
+  climate_df <- climate_df %>%
+    filter(xmin < longitude & xmax > longitude & ymin < latitude & ymax > latitude)
+  
+  # if there is an associated grid square
+  if (nrow(climate_df) > 0){
+    # extract the climate value
+    value <- climate_df[1, lookup_column]
+  } else {
+    # otherwise, set the cell to NA
+    value <- NA
+  }
+  
+  return(value)
+}
+```
+
+Now we can use the mapply function to apply the find_climate_var function and get temperature (mean degrees Centigrade) and then precipitation values (total annual precipitation in millimeters). This will take several minutes so I would recommend running the chunk below, and while it is running, go to these [online directions](https://drive.google.com/file/d/1Oh4wiVjroHBoo-GNL890MPeTdegyVFov/view?usp=share_link) I made to download data from CCH2 for the independent part of the homework.
+
+```{r}
+CA_poppy$tmean <- mapply(find_climate_var, 
+                         CA_poppy$year, 
+                         CA_poppy$decimalLongitude,
+                         CA_poppy$decimalLatitude, 
+                         MoreArgs = list(climate_df = tmean))
+
+CA_poppy$ppt <- mapply(find_climate_var, 
+                       CA_poppy$year, 
+                       CA_poppy$decimalLongitude,
+                       CA_poppy$decimalLatitude, 
+                       MoreArgs = list(climate_df = ppt))
+
+# Write out results so we can reload them later if need be
+write.csv(CA_poppy, "CA_occurrences_w_climate_data.csv", row.names = F)
+```
+
+Once that is done, we can use filter to get rid of any rows with NAs for tmean and ppt: 
+
+```{r}
+CA_poppy <- CA_poppy %>%
+  filter(!is.na(tmean)) %>%
+  filter(!is.na(ppt))
+```
+
+
+## Multivariate linear model without accounting for distance
+
+### Removing distances of zero
+
+If there is significant spatial autocorrelation, we will need to control for it in our model. Unfortunately, Moran's I and linear mixed models with a spatial correlation structure both assume that no data points come from exactly the same coordinates (distance between them is zero). That means that to test for spatial autocorrelation, we need to change our data so that no two records were collected in precisely the same place. The easiest way to do this is to group by coordinates and then randomly select one record to keep using the sample_n() function:
+
+```{r}
+CA_poppy_separate <- CA_poppy %>%
+  group_by(decimalLongitude, decimalLatitude) %>%
+  sample_n(1)
+```
+
+
+### Fitting a linear model
+
+We are interested in three things:
+
+* First, is there a significant trend in flower phenology over time? 
+* Second, is there a significant trend in the climate variables over time?
+* Third, are either of the climate variables good predictors of flower phenology in this species?
+
+That means we want examine 4 different models. The last model that includes year, tmean, and ppt is the most interesting, so we'll also examine that model for fit and spatial autocorrelation.
+
+
+#### phenology_year_model:
+
+```{r}
+phenology_year_model <- lm(startDayOfYear ~ year, data = CA_poppy_separate)
+
+summary(phenology_year_model)
+```
+
+There appears to be a trend in flower phenology over time.
+
+
+#### tmean_year_model
+
+1. Use the same syntax and lm() function to fit a model with tmean as the dependent variable, year as the independent variable, and CA_poppy_separate as the data source. Then use the summary function to examine the model output:
+
+```{r}
+tmean_year_model <- lm(tmean ~ year, data = CA_poppy_separate)
+
+summary(tmean_year_model)
+```
+
+2. Does there seem to be a significant trend in temperature over the years? If so, is temperature increasing or decreasing?  
+There is a significant trend in temperature (p < 2e-16). The temperature is increasing every year, as 0.02209 is a positive slope.
+
+
+#### ppt_year_model
+
+3. Use the same syntax and lm() function to fit a model with ppt (precipitation) as the dependent variable, year as the independent variable, and CA_poppy_separate as the data source. Then use the summary function to examine the model output:
+
+```{r}
+ppt_year_model <- lm(ppt ~ year, data = CA_poppy_separate)
+
+summary(ppt_year_model)
+```
+
+4. Does there seem to be a significant trend in total annual precipitation over the years? If so, is it increasing or decreasing?  
+There is a significant trend in total annual precipitation (p = 0.000394 < 0.05). Precipitation is decreasing every year, as -1.4683 is a negative slope.
+
+
+#### phenology_climate_model
+
+5. Now fit a linear model with startDayOfYear as the dependent variable, year, tmean (mean temperature), ppt (total precipitation) as the independent variables, and CA_poppy_separate as the data source. Then use the summary function to examine the model output:
+
+```{r}
+phenology_climate_model <- lm(startDayOfYear ~ year + tmean + ppt, data = CA_poppy_separate)
+
+summary(phenology_climate_model)
+```
+
+
+##### Assumption: Linear relationship
+
+We can make 3 scatter plots to see if a linear relationship seems reasonable.
+
+```{r}
+CA_poppy_separate %>%
+  ggplot(aes(x = year, y = startDayOfYear)) +
+  geom_point()
+```
+
+A linear relationship between these variables seems reasonable.
+
+6. Make scatter plots of tmean vs. startDayOfYear and then ppt vs. startDayOfYear to assess those relationships. Unless the relationships very clearly follow a non-linear relationship (exponential, logistic, etc.) we generally decide that assuming a linear relationship is reasonable. 
+
+```{r}
+CA_poppy_separate %>%
+  ggplot(aes(x = tmean, y = startDayOfYear)) +
+  geom_point()
+```
+
+```{r}
+CA_poppy_separate %>%
+  ggplot(aes(x = ppt, y = startDayOfYear)) +
+  geom_point()
+```
+
+
+##### Assumption: Homoscedasticity/Homogeneity of variances
+
+Now let's look at the residuals:
+
+```{r}
+plot(phenology_climate_model, 1)
+```
+
+The variance seems to be distributed fairly uniformly for all fitted values. Fewer values at the two extremes mean we would expect some decrease in variation there.
+
+
+##### Assumption: Normally-distrubuted residuals
+
+```{r}
+plot(phenology_climate_model, 2)
+```
+
+That deviation from the y = x line suggests that a transformation could be helpful. Let's see if a log transformation helps:
+
+```{r}
+phenology_climate_model <- lm(log(startDayOfYear) ~ year + tmean + ppt, data = CA_poppy_separate)
+
+plot(phenology_climate_model, 2)
+```
+
+That's not perfect, but it's a big improvement and our sample size will help us deal with some deviation from normality.
+
+
+##### Assumption: No significant multicollinearity
+
+So here we have multiple predictor variables and need to consider whether a correlation between them might cause inaccurate estimates of model coefficients. One common way to do that is to calculate a [variance inflation factor](https://online.stat.psu.edu/stat462/node/180/). This value indicates how much other predictors in a model inflate the variance of a given predictor variable. As a rule of thumb:
+
+* if values are under 4, we decide multicollinearity is not a problem
+* values higher than 4 require more investigation
+* values 10 or higher definitely require a change in the model
+
+```{r}
+VIF(phenology_climate_model)
+```
+
+6. Do these values indicate multicollinearity?  
+These values are all under 4, so we don't need to worry about multicollinearity.
+
+
+##### Assumption: Independence of observations
+
+Because this is our most interesting/important model, we'll also examine it for spatial autocorrelation and include that in the model if necessary.
+
+```{r}
+# save the residuals
+CA_poppy_separate$model_resid <- residuals.lm(phenology_climate_model)
+
+# create a distance matrix for all points
+my_dists <- CA_poppy_separate %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>% # get the coordinates of all points
+  dist() %>% # get the distances between all of them
+  as.matrix() # make this into a distance matrix
+
+# get the inverse so close points are weighted more strongly
+my_dists_inv <- 1/my_dists # get the inverse
+diag(my_dists_inv) <- 0 # set the diagonal to 0
+
+# Moran's I for spatial autocorrelation
+Moran.I(CA_poppy_separate$model_resid, my_dists_inv)
+```
+
+8. Based on these results, do we need to control for spatial autocorrelation?  
+Since the null hypothesis is that there is no spatial autocorrelation, the fact that the p value is so low (i.e. there is a very significant difference between the value that we would expect if there were no spatial autocorrelation (very close to 0) and the observed value that we actually got) means that we reject the null hypothesis that there is no spatial autocorrelation. We do need to control for spatial autocorrelation.
+
+
+## Multivariate linear model that accounts for distance
+
+So how do we control for spatial autocorrelation? One way to do this is to include spatial correlation as a random effect in a mixed model. The spaMM library (great library name!) has a function called fitme() that makes setting up the model fairly easy, but the function takes a long time to run. We will use a [Matern covariance function](https://en.wikipedia.org/wiki/Mat%C3%A9rn_covariance_function):
+
+```{r}
+spamm_model <- fitme(log(startDayOfYear) ~ year + tmean + ppt + Matern(1 | decimalLongitude + decimalLatitude), data = CA_poppy_separate)
+
+summary(spamm_model)
+```
+
+### Getting p-values
+
+You'll notice that we get no p-values in these results. This is because there is a lot of argument among statisticians about how best to calculate p-values for mixed models. However, we can get estimates if we use the degrees of freedom from the linear model and the pt() function:
+
+```{r}
+# year
+2 * pt(-1.15, # t-value
+       1269, # degrees of freedom = (number of data points) - (number of coefficients estimated)
+       lower.tail = TRUE) # because t-value is negative
+# Note: multiplying by 2 gives us 2-tailed p-values
+
+# tmean
+2 * pt(-13.382, # t-value
+       1269, 
+       lower.tail = TRUE) # because t-value is negative
+
+# ppt
+2 * pt(1.688, 
+       1269, 
+       lower.tail = FALSE) # because t-value is positive
+```
+
+
+### Backtransforming model coefficients
+
+Finally, you'll note that the dependent or response variable in our model was log(startDayOfYear) rather than just startDayOfYear. That means that we need consider that transformation when interpreting the coefficient estimates. Really what we are saying is that (look at this in the Preview view):
+
+$ln(Y) = \beta_0 + \beta_1*year + \beta_2*tmean + \beta_3*ppt$
+
+which is the same as
+
+$Y = e^{\beta_0 + \beta_1*year + \beta2*tmean + \beta3*ppt}$
+
+which is the same as
+
+$Y = e^{\beta_0}*e^{\beta_1*year}*e^{\beta2*tmean}*e^{\beta3*ppt}$
+
+which means that for every increase in one year, we are estimating that the startDayOfYear will be multiplied by $e^{-3.703e-04}$ or 0.9996298. In other words, we estimate that the day of flowering will decrease by about 0.04% each year.
+
+1. Using the same back-transforming approach, for every increase in one degree C of mean temperature, how would we expect the startDayOfYear to change?  
+beta_2 is -0.0625424 (from summary(spamm_model)) and tmean increases by 1 degree C. e^{\beta2*(tmean+1)}=e^{\beta2*tmean}+e^{\beta2*1}, meaning that startDayOfYear (which is Y) will be multiplied by e^{\beta2}=e^{-0.0625424}.
+
+
+### Plotting/interpreting model estimates
+
+Let's plot that:
+
+```{r}
+mean_year <- mean(CA_poppy_separate$year)
+mean_ppt <- mean(CA_poppy_separate$ppt)
+
+CA_poppy_separate %>%
+  ggplot(aes(x = tmean, y = startDayOfYear)) +
+  geom_point() +
+  geom_function(fun = function(x) exp(6.401e+00)*exp(-3.703e-04*mean_year)*exp(-6.277e-02*x)*exp(5.793e-05*mean_ppt),
+                color = "blue")
+```
+The plot is a demonstration that the relationship between the two variables can be plotted. There's a lot of variation around the line, but the points kind of follow it.
+
+2. Based on these results, which variables have significant effects on California poppy phenology?  
+Based on the p-values calculated from the t-values in the spamm_model summary, temperature has the greatest effect (smallest p-value). Precipitation could possibly have a marginal effect (smallish p-value), but year does not a significant effect (large p-value).
+
+3. What is the direction of the effect for each predictor variable (positive or negative)?
+year and tmean have negative coefficient estimates (from summary(spamm_model)) so they would cause startDayOfYear to occur earlier in the year, while ppt has a positive coefficient estimate, so it would push startDayOfYear later in the year.
+
+4. How could you use these results to predict how California poppy phenology may change in the future?
+We could plug in values for the variables to model how the phenology changes in the future. For example, if you have a prediction for mean temperature and precipitation in a future year, these could be plugged in to predict the day that the poppies start blooming.
+

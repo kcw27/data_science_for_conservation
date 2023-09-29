@@ -1,0 +1,438 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## File metadata
+
+Template author: Morgan Carr-Markell  
+Template last modified on: March 21, 2023  
+Notebook modified by: Katie Wang  
+Notebook last modified on: March 27, 2023
+
+
+## Goals of the assignment
+
+This homework assignment is meant to give you experience with:
+
+* cleaning/wrangling data
+* fitting linear models
+* testing the assumptions of linear models
+* dealing with spatial autocorrelation using mixed models
+
+In this independent part of the homework assignment, you will use the newly-finished California phenology project records to determine whether climate change has influenced the timing of flowering of a California native plant that you choose. You can choose any flowering species, but I would strongly recommend not choosing a species that blooms in the winter or is rare because that will make the results very difficult to interpret.
+
+If you have not already done so, go to these [online directions](https://drive.google.com/file/d/1Oh4wiVjroHBoo-GNL890MPeTdegyVFov/view?usp=share_link) I made to download data from CCH2. Remember to move the occurrences.csv file that you download into the hw6 data folder.
+
+
+## Data citations
+
+Biodiversity occurrence data published by: CCH2 Portal (accessed through the CCH2 Portal Portal, https://www.cch2.org/portal, 2023-03-17).
+
+PRISM Climate Group, Oregon State University, https://prism.oregonstate.edu, data created 13 Jun 2021, accessed 14 Mar 2023.
+
+
+## Loading libraries
+
+```{r}
+library(tidyverse) # for wrangling data
+library(sf) # for creating/plotting sf points
+library(maps) # for mapping
+library(ape) # for testing whether there is spatial autocorrelation
+library(regclass) # for testing for multicollinearity
+library(spaMM) # for mixed models with spatial autocorrelation included
+library(RSpectra) # for faster model fitting
+```
+
+
+## Reading in data
+
+1. Read in the three csv files for: 
+
+* the records of your plant of interest
+* the historical mean temperature values from PRISM
+* the historical total annual precipitation values from PRISM
+
+```{r}
+# Arroyo lupine occurrences downloaded from CCH2
+lupine_occurrence <- read.csv("data/occurrences.csv")
+
+# The mean temperature (tmean) and precipitation (ppt) are the same files as in the in-class portion.
+tmean <- read.csv("data/California_grid_tmean_1920_2020.csv")
+ppt <- read.csv("data/California_grid_ppt_1920_2020.csv")
+```
+
+
+## Processing the occurrence records
+
+
+### Data wrangling
+
+1. First, overwrite the plant data frame and select only:
+
+* year
+* decimalLongitude
+* decimalLatitude
+* startDayOfYear
+
+**Note:** You'll need to use dplyr::select instead of just select because multiple libraries we loaded have functions named 'select' in them.
+
+```{r}
+lupine_occurrence <- lupine_occurrence %>%
+  dplyr::select(year, decimalLongitude, decimalLatitude, startDayOfYear)
+```
+
+2. Next, group by year, decimal Longitude, and decimalLatitude and then summarize across those groups to get the mean startDayOfYear for each.
+
+```{r}
+lupine_occurrence <- lupine_occurrence %>%
+  group_by(year, decimalLongitude, decimalLatitude) %>%
+  summarize(startDayOfYear = mean(startDayOfYear))
+```
+
+3. Then, use filter() get rid of rows we won't be able to use in our model, including rows where:
+
+* startDayOfYear is NA (Note: I'd recommend using !is.na(startDayOfYear))
+* year < 1920
+* year > 2020
+
+```{r}
+lupine_occurrence <- lupine_occurrence %>%
+  filter(!is.na(startDayOfYear)) %>%
+  filter(year >= 1920) %>%
+  filter(year <= 2020)
+```
+
+
+### Removing outliers
+
+Next, look to see if you should remove any data due to extreme (and probably erroneous) coordinates.
+
+```{r}
+USA_sf <- st_as_sf(maps::map("state", 
+                             fill=TRUE, 
+                             plot =FALSE),
+                   crs = 4326) # WGS84
+
+CA_sf <- USA_sf %>%
+  filter(ID == "california")
+```
+
+4. Create an sf version of the plant record data frame using the st_as_sf() function:
+
+```{r}
+lupine_sf <- st_as_sf(lupine_occurrence,
+                      coords = c("decimalLongitude", "decimalLatitude"),
+                      crs = 4326)
+```
+
+5. Now plot the points over an outline of California:
+
+```{r}
+lupine_sf %>%
+  ggplot() +
+  geom_sf(data = CA_sf, fill = "maroon") +
+  geom_sf()
+```
+
+6. Do you see any points that seem wrong here?  
+Many of the points lie in the ocean. It's possible that they actually lie on islands that weren't included in the raster object, though.
+
+7. If so, remove those using st_crop, filling in the xmin, ymin, xmax, and ymax that seem reasonable to you:
+
+```{r}
+# there doesn't seem to be an easy way to remove the data points in the ocean
+# for future reference, if you find an sf object of California, there's a sf function to 
+# filter to just California (possibly using st_intersects() from the sf library?)
+```
+
+Don't worry if you get an error message here about attribute variables.
+
+
+8. Next, look at the range of startDayOfYear using a box plot or histogram:
+
+```{r}
+hist(lupine_occurrence$startDayOfYear)
+```
+
+9. If any points seem far from all the others, remove them using filter():
+
+```{r}
+# there's a gap between the rightmost points and the bin to the left of it, so I'll filter that out
+lupine_occurrence <- lupine_occurrence %>%
+  filter(startDayOfYear < 250)
+```
+
+
+## Extracting environmental variables
+
+The function I wrote below is not the most efficient function, but it will allow you to extract the associated temperature and precipitation values from the tmean and ppt data frames for each row of your plant record data frame.
+
+```{r}
+find_climate_var <- function(year, longitude, latitude, climate_df){
+  # to match the correct year column
+  lookup_column <- paste0("year_", as.character(year))
+  
+  # filter to get the correct spatial grid square
+  climate_df <- climate_df %>%
+    filter(xmin < longitude & xmax > longitude & ymin < latitude & ymax > latitude)
+  
+  # if there is an associated grid square
+  if (nrow(climate_df) > 0){
+    # extract the climate value
+    value <- climate_df[1, lookup_column]
+  } else {
+    # otherwise, set the cell to NA
+    value <- NA
+  }
+  
+  return(value)
+}
+```
+
+10. Now use the mapply function to apply the find_climate_var function and get temperature (mean degrees Centigrade) and then precipitation values (total annual precipitation in millimeters). Refer to the hw6_in_class code for this:
+
+```{r}
+lupine_occurrence$tmean <- mapply(find_climate_var, 
+                         lupine_occurrence$year, 
+                         lupine_occurrence$decimalLongitude,
+                         lupine_occurrence$decimalLatitude, 
+                         MoreArgs = list(climate_df = tmean)) #uses the imported tmean dataframe as the climate_df
+
+lupine_occurrence$ppt <- mapply(find_climate_var, 
+                       lupine_occurrence$year, 
+                       lupine_occurrence$decimalLongitude,
+                       lupine_occurrence$decimalLatitude, 
+                       MoreArgs = list(climate_df = ppt))
+
+# Write out results so we can reload them later if need be
+write.csv(lupine_occurrence, "lupine_occurrences_w_climate_data.csv", row.names = F)
+```
+
+11. Once that is done, use filter to get rid of any rows with NAs for tmean and ppt: 
+
+```{r}
+lupine_occurrence <- lupine_occurrence %>%
+  filter(!is.na(tmean)) %>%
+  filter(!is.na(ppt))
+```
+
+
+## Multivariate linear model without accounting for distance
+
+### Removing distances of zero
+
+12. Group records by coordinates and then randomly select one record to keep using the sample_n() function. Refer to the hw6_in_class code for this:
+
+```{r}
+lupine_occurrence_separate <- lupine_occurrence %>%
+  group_by(decimalLongitude, decimalLatitude) %>%
+  sample_n(1)
+```
+
+
+### Fitting a linear model
+
+We are interested in three things:
+
+* First, is there a significant trend in flower phenology over time? 
+* Second, is there a significant trend in the climate variables over time?
+* Third, are either of the climate variables good predictors of flower phenology in this species?
+
+That means we want examine 4 different models. The last model that includes year, tmean, and ppt is the most interesting, so we'll also examine that model for fit and spatial autocorrelation.
+
+
+#### phenology_year_model:
+
+13. Fit a model with startDayOfYear as the dependent variable, year as the independent variable, and the plant record data frame as the data source. Then use the summary function to examine the model output
+
+```{r}
+#uses the dataframe with duplicate coordinates removed
+phenology_year_model <- lm(startDayOfYear ~ year, data = lupine_occurrence_separate)
+
+summary(phenology_year_model)
+```
+
+14. Does there seem to be a significant trend in flower phenology over the years? If so, is it earlier or later in the year?  
+There is no significant trend in flower phenology over the years; p = 0.720 > 0.05
+
+#### tmean_year_model
+
+15. Fit a model with tmean as the dependent variable, year as the independent variable, and the plant record data frame as the data source. Then use the summary function to examine the model output:
+
+```{r}
+tmean_year_model <- lm(tmean ~ year, data = lupine_occurrence_separate)
+
+summary(tmean_year_model)
+```
+
+16. Does there seem to be a significant trend in temperature over the years? If so, is temperature increasing or decreasing?  
+Yes, the temperature is increasing (slope = 0.014487 > 0, p < 0.05).
+
+#### ppt_year_model
+
+17. Fit a model with ppt (precipitation) as the dependent variable, year as the independent variable, and the plant record data frame as the data source. Then use the summary function to examine the model output:
+
+```{r}
+ppt_year_model <- lm(ppt ~ year, data = lupine_occurrence_separate)
+
+summary(ppt_year_model)
+```
+
+18. Does there seem to be a significant trend in total annual precipitation over the years? If so, is it increasing or decreasing?  
+There isn't a trend in total annual precipitation over the years (p = 0.440 > 0.05).
+
+#### phenology_climate_model
+
+19. Now fit a linear model with startDayOfYear as the dependent variable, year, tmean (mean temperature), ppt (total precipitation) as the independent variables, and the plant record data frame as the data source. Then use the summary function to examine the model output:
+
+```{r}
+phenology_climate_model <- lm(startDayOfYear ~ year + tmean + ppt, data = lupine_occurrence_separate)
+
+summary(phenology_climate_model)
+```
+
+
+##### Assumption: Linear relationship
+
+20. Make 3 scatter plots to see if a linear relationship with the three predictor variables seems reasonable:
+
+```{r}
+lupine_occurrence_separate %>% 
+  ggplot(aes(x = year, y = startDayOfYear)) +
+  geom_point()
+
+lupine_occurrence_separate %>% 
+  ggplot(aes(x = tmean, y = startDayOfYear)) +
+  geom_point()
+
+lupine_occurrence_separate %>% 
+  ggplot(aes(x = ppt, y = startDayOfYear)) +
+  geom_point()
+```
+
+21. Do any plots seem to show a clear, non-linear pattern?  
+None of them do, so it's reasonable to assume that there might be a linear relationship between the dependent variable (startDayOfYear) and the three independent variables. There's no apparent exponential or logarithmic relationship.
+
+##### Assumption: Homoscedasticity/Homogeneity of variances
+
+Now let's look at the residuals:
+
+```{r}
+plot(phenology_climate_model, 1)
+```
+
+22. Is the variance distributed fairly uniformly for all fitted values?  
+Yes, the variance seems to be distributed uniformly for all fitted values.
+
+
+##### Assumption: Normally-distrubuted residuals
+
+```{r}
+plot(phenology_climate_model, 2)
+```
+
+23. Is there a large deviation from the y = x line?  
+No, the Q-Q plot fits very closely to the y=x line.
+
+
+For the purposes of this independent part of the hw6 assignment, we will assume that our sample size is sufficient to deal with deviations for normality.
+
+
+##### Assumption: No significant multicollinearity
+
+24. Use the VIF() function to calculate the variance inflation factors of the three predictors. Refer to the hw_in_class code:
+
+```{r}
+VIF(phenology_climate_model)
+```
+
+25. Do these values indicate multicollinearity?  
+They do not. They're all under 4, so as explained in the in-class code, multicollinearity isn't a problem.
+
+
+If so, for the purposes of this assignment you change the model to not include one of the climate variables.
+
+
+##### Assumption: Independence of observations
+
+For the questions below, refer to the code in hw6_in_class:
+
+26. Add a column to the plant record data frame for residuals of the phenology_climate model:
+
+```{r}
+lupine_occurrence_separate$model_resid <- residuals.lm(phenology_climate_model)
+```
+
+27. Create a distance matrix for all points
+
+```{r}
+my_dists <- lupine_occurrence_separate %>%
+  dplyr::select(decimalLongitude, decimalLatitude) %>% # get the coordinates of all points
+  dist() %>% # get the distances between all of them
+  as.matrix() # make this into a distance matrix
+```
+
+28. Get the inverse of this distance matrix and set the diagonal values to zero:
+
+```{r}
+my_dists_inv <- 1/my_dists # the inverse
+diag(my_dists_inv) <- 0 # setting diagonals to 0
+```
+
+29. Use the Moran.I function to test for spatial autocorrelation:
+
+```{r}
+Moran.I(lupine_occurrence_separate$model_resid, my_dists_inv)
+# the input is the residuals and the inverse of the distance matrix with diagonals set to 0
+```
+
+30. Based on these results, do you need to control for spatial autocorrelation?  
+Yes, we do need to control for spatial autocorrelation. The p value is small enough to reject the null hypothesis that there is no spatial autocorrelation.
+
+
+## Multivariate linear model that accounts for distance
+
+31. Regardless of whether you really need to, use the fitme() function to fit a mixed model with Matern(1 | decimalLongitude + decimalLatitude) included:
+
+```{r}
+# to control for spatial autocorrelation, include spatial correlation as a random effect in a mixed model
+spamm_model <- fitme(log(startDayOfYear) ~ year + tmean + ppt + Matern(1 | decimalLongitude + decimalLatitude), 
+                     data = lupine_occurrence_separate)
+
+summary(spamm_model)
+```
+
+### Getting p-values
+
+32. Calculate the three p-values. The degrees of freedom are the number of data points minus 4 (the number of estimated coefficients):
+
+```{r}
+# Use the pt() function; arguments are t-value, degrees of freedom, and lower.tail
+# Get the t-value from summary(spamm_model).
+# Degrees of freedom: (number of data points in lupine_occurrence_separate) - (number of coefficients estimated)
+# There are 444 observations in lupine_occurrence_separate
+# lower.tail is TRUE if t-value is negative, FALSE if t-value is positive
+# And then multiply by 2 to get a two-tailed p-value
+
+# year
+2 * pt(0.005506, # t-value
+       440, # degrees of freedom (444-4)
+       lower.tail = FALSE) # because t-value is positive
+
+# tmean
+2 * pt(1.752672, 440, lower.tail = FALSE)
+
+# ppt
+2 * pt(2.797135, 440, lower.tail = FALSE)
+```
+
+33. Based on these results, which variables have significant effects on the plant's phenology?  
+Based on these p-values, annual precipitation is the only variable out of the three predictor variables tested to have significant effects on phenology, as it was the only one with p < 0.05.
+
+34. What is the direction of the effect for each predictor variable (positive or negative)?   
+All of the coefficient estimates for the predictor variables year, tmean, and ppt (from summary(spamm_model)) were positive, so the effect that each one of them contributes is to push the bloom date for lupines later in the year. Granted, ppt was the only one with a p-value low enough to suggest a significant effect.
+
+35. How might a change in the phenology of this plant species lead to declines in the plants populations or in populations of other species that interact with the plant?  
+It's important that the phenology of a plant species lines up with the life histories of its pollinators, not to mention those of other species it interacts with. If they are out of sync, then the plant can't benefit as much from pollination services, and it will also put stress on the pollinators because their food source is no longer available throughout the time range that they are adapted to exploit it in.
+
